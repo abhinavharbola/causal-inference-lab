@@ -1,13 +1,3 @@
-"""
-Tests for src/validation/confounding.py.
-
-Covers: covariate selection by outcome correlation, the retention rule's
-behavior at g2=0 vs g2>0, the two-part validation gate, and both outcomes
-of the calibration loop (converges on a real relationship, explicitly
-reports non-convergence on an outcome-irrelevant covariate rather than
-looping forever or silently accepting a bad g2).
-"""
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -25,11 +15,6 @@ from src.validation.confounding import (
 
 @pytest.fixture
 def synthetic_data():
-    """
-    A dataset where f0 drives the outcome and is randomized against
-    treatment (RCT), f_noise is unrelated to the outcome, and treatment
-    has a known true effect. Used across most tests in this file.
-    """
     rng = np.random.default_rng(0)
     n = 50_000
     treatment = rng.binomial(1, 0.85, n)
@@ -59,8 +44,6 @@ def test_select_confounding_covariate_picks_outcome_correlated_column(synthetic_
 
 
 def test_retention_probability_at_zero_g2_does_not_depend_on_treatment():
-    """At g2=0 the X*T interaction term vanishes, so retention probability
-    should be identical for a given X regardless of T."""
     X = np.array([-1.0, 0.0, 1.0, 2.0])
     T1 = np.ones_like(X)
     T0 = np.zeros_like(X)
@@ -83,15 +66,12 @@ def test_check_confounding_validity_gate_requires_both_conditions(synthetic_data
     df, ground_truth = synthetic_data
     ci = (ground_truth["ci_lower"], ground_truth["ci_upper"])
 
-    # g2=0: no induced confounding, gate should fail (naive estimate should
-    # stay within the ground-truth CI, and X shouldn't correlate with T).
     unconfounded = induce_confounding(df, "f0", "treatment", g0=0.0, g1=0.0, g2=0.0, random_state=1)
     result_none = check_confounding_validity(
         unconfounded, "f0", "treatment", "visit", ground_truth["point_estimate"], ci
     )
     assert not result_none["passes_gate"]
 
-    # g2=3: strong induced confounding, gate should pass.
     confounded = induce_confounding(df, "f0", "treatment", g0=0.0, g1=0.0, g2=3.0, random_state=1)
     result_strong = check_confounding_validity(
         confounded, "f0", "treatment", "visit", ground_truth["point_estimate"], ci
@@ -116,18 +96,6 @@ def test_calibrate_confounding_converges_on_outcome_relevant_covariate(synthetic
 
 
 def test_calibrate_confounding_reports_non_convergence_on_irrelevant_covariate(synthetic_data):
-    """
-    f_noise doesn't correlate with the outcome, so biasing retention by
-    f_noise*T should almost never push the naive estimate outside the
-    ground-truth CI. The validation gate uses alpha=0.05 for the
-    correlation-significance check, so it has an inherent ~5%
-    false-positive rate by construction (this is expected hypothesis-test
-    behavior, not a bug) — a single seed can occasionally converge by
-    chance. This test checks the behavior holds across several seeds
-    rather than asserting a single draw, and confirms the loop always
-    reports its convergence status explicitly (never hangs, never
-    returns a None retained_df) regardless of outcome.
-    """
     df, ground_truth = synthetic_data
     ci = (ground_truth["ci_lower"], ground_truth["ci_upper"])
 
@@ -143,8 +111,6 @@ def test_calibrate_confounding_reports_non_convergence_on_irrelevant_covariate(s
         if result["converged"]:
             n_converged += 1
 
-    # Should rarely converge (expected false-positive rate ~alpha=0.05);
-    # allow generous headroom since this is a small, noisy sample of seeds.
     assert n_converged <= 2, f"{n_converged}/{n_trials} seeds falsely converged on an outcome-irrelevant covariate"
 
 
