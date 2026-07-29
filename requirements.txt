@@ -1,0 +1,33 @@
+# Data handling
+pandas>=2.0
+numpy>=1.24
+datasets>=2.19          # Hugging Face loader for criteo/criteo-uplift
+scikit-uplift>=0.5.1    # sklift, fallback loader + Qini metrics
+
+# Modeling / causal inference
+scikit-learn>=1.4       # T-learner base classifiers, calibration, KMeans, propensity model
+statsmodels>=0.14       # OLS, power analysis (NormalIndPower, MDE), BH correction, proportions z-test
+scipy>=1.11             # bootstrap, hypothesis tests, Rosenbaum bounds (binom, pearsonr)
+
+# Plotting (love plots, Qini curve, Rosenbaum bounds plot, dashboard charts)
+matplotlib>=3.8
+
+# Dashboard
+streamlit>=1.35
+
+# Database: Supabase primary, with a local SQLite fallback built into src/utils/db.py
+# (so the pipeline and dashboard work without any cloud account configured)
+supabase>=2.4
+
+# Logging
+logfire>=0.30
+
+# LLM (free-tier diagnostic critique step only)
+groq>=0.9               # primary provider
+openai>=1.30            # OpenAI-compatible client, used for the NVIDIA NIM fallback provider
+
+# Testing
+pytest>=8.0
+
+# Notebook environment
+jupyter>=1.0
