@@ -1,13 +1,3 @@
-"""
-Tests for src/utils/power_analysis.py.
-
-Covers: MDE calculation correctness (visit vs conversion should show the
-sensitivity gap the project's outcome-variable decision depends on),
-required_sample_size / calculate_mde being consistent with each other,
-and segment_power_analysis's handling of unequal treatment/control splits
-and degenerate (empty-arm) segments.
-"""
-
 import numpy as np
 import pytest
 
@@ -28,12 +18,6 @@ def test_calculate_mde_returns_smaller_effect_for_larger_n():
 
 
 def test_conversion_requires_larger_relative_effect_than_visit_at_same_n():
-    """
-    This is the specific comparison the Section 1.5 outcome-variable
-    decision depends on: at a shared planned sample size, conversion's
-    much lower base rate should make its MDE harder to hit, in relative
-    terms, than visit's.
-    """
     visit_result = calculate_mde("visit", baseline_rate=0.045, n_per_group=100_000)
     conversion_result = calculate_mde("conversion", baseline_rate=0.003, n_per_group=100_000)
 
@@ -50,11 +34,6 @@ def test_mde_comparison_table_has_expected_columns_and_row_count():
 
 
 def test_required_sample_size_is_consistent_with_calculate_mde():
-    """
-    required_sample_size(effect) and calculate_mde(n) should round-trip:
-    the n required to detect a given effect should itself detect
-    approximately that same effect when fed back into calculate_mde.
-    """
     baseline_rate = 0.045
     true_effect = 0.005
 
@@ -87,12 +66,6 @@ def test_segment_power_analysis_flags_small_segments_as_underpowered():
 
 
 def test_segment_power_analysis_respects_treatment_share():
-    """
-    An unequal treatment/control split should reduce achieved power
-    relative to what a balanced 50/50 split of the same total n would
-    give (this was the fix for the flaw where n_segment // 2 assumed a
-    balanced split that Criteo does not actually have).
-    """
     segments = {"seg": 100_000}
 
     balanced = segment_power_analysis(segments, baseline_rate=0.045, true_effect_absolute=0.005, treatment_share=0.5)
@@ -102,8 +75,6 @@ def test_segment_power_analysis_respects_treatment_share():
 
 
 def test_segment_power_analysis_handles_zero_arm_segment_gracefully():
-    """A segment small enough that treatment_share rounds one arm to zero
-    should be flagged as underpowered rather than raising an exception."""
     segments = {"empty_control_risk": 1}
     result = segment_power_analysis(segments, baseline_rate=0.045, true_effect_absolute=0.005, treatment_share=0.99)
 

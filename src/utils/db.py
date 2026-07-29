@@ -1,21 +1,3 @@
-"""
-Stores each estimation run (method, confounding severity, config, point
-estimate, CI, balance statistics) so the Streamlit dashboard can compare
-configurations/methods/severities across runs.
-
-This is a different use of persistent storage than project 2's report
-history: here a "run" is one method x severity x config combination from
-the Section 1 estimator comparison (or a Section 2 segment estimate),
-not a saved report. Keeping that distinction explicit here so this
-doesn't read as a copy-paste of project 2's storage layer.
-
-Primary backend: Supabase (REST-based, simplest free-tier setup for a
-small table like this). Falls back to a local SQLite file if
-SUPABASE_URL / SUPABASE_KEY are not configured, so the pipeline and
-dashboard remain runnable without any cloud account, consistent with the
-project's free-tier-first, feasibility-first stance.
-"""
-
 import json
 import logging
 import os
@@ -26,11 +8,6 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Anchored to the project root (two levels up from src/utils/db.py) rather
-# than left relative to the caller's current working directory. Notebooks
-# run with cwd set to their own folder (notebooks/), while the dashboard
-# runs from the project root; a cwd-relative path would silently point
-# each of them at a different SQLite file instead of sharing one.
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LOCAL_DB_PATH = os.path.join(_PROJECT_ROOT, "data", "local_runs.db")
 TABLE_NAME = "estimation_runs"
@@ -52,11 +29,6 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
 
 
 def get_supabase_client(url: str = None, key: str = None):
-    """
-    Returns a configured Supabase client, or None if credentials are not
-    available (either not passed and not set as SUPABASE_URL /
-    SUPABASE_KEY env vars, or the supabase package import fails).
-    """
     url = url or os.environ.get("SUPABASE_URL")
     key = key or os.environ.get("SUPABASE_KEY")
 
@@ -155,12 +127,6 @@ def log_estimation_run(
     balance_stats: dict = None,
     client=None,
 ) -> None:
-    """
-    Logs a single estimation run. Tries the Supabase client if one is
-    given (or can be created from env vars); falls back to local SQLite
-    otherwise. Call this once per method x severity combination in the
-    Section 1 estimator comparison loop.
-    """
     if client is None:
         client = get_supabase_client()
 
@@ -189,11 +155,6 @@ def log_estimation_run(
 
 
 def fetch_estimation_runs(method: str = None, severity_label: str = None, client=None) -> pd.DataFrame:
-    """
-    Fetches logged runs, optionally filtered by method and/or severity
-    label, as a DataFrame for the dashboard to plot. Tries Supabase first
-    if a client is available, falls back to local SQLite otherwise.
-    """
     if client is None:
         client = get_supabase_client()
 

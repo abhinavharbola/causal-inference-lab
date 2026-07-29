@@ -1,15 +1,3 @@
-"""
-Section 1 diagnostics: covariate balance (standardized mean differences,
-love plots) before and after matching, and overlap/common-support
-reporting. These are the diagnostics the Section 4 LLM critique step
-reads, so their output format is kept simple and tabular rather than
-plot-only.
-
-Common-support trimming logic itself lives in estimators.py
-(apply_common_support_trim) and is imported here rather than duplicated;
-this module reports on overlap, it doesn't re-decide the trimming rule.
-"""
-
 import logging
 
 import numpy as np
@@ -19,8 +7,6 @@ from src.validation.estimators import apply_common_support_trim, get_matched_pai
 
 logger = logging.getLogger(__name__)
 
-# Conventional imbalance threshold (Austin, 2011): |SMD| > 0.1 is
-# considered meaningful imbalance for a covariate.
 SMD_IMBALANCE_THRESHOLD = 0.1
 
 
@@ -29,15 +15,6 @@ def compute_smd(
     covariate_cols: list,
     treatment_col: str,
 ) -> pd.DataFrame:
-    """
-    Standardized mean difference per covariate:
-        SMD = (mean_treated - mean_control) / pooled_std
-    where pooled_std = sqrt((var_treated + var_control) / 2).
-
-    This is the standard covariate-balance metric independent of sample
-    size, unlike a raw t-test which becomes significant on trivial
-    differences at large n.
-    """
     treated = df[df[treatment_col] == 1]
     control = df[df[treatment_col] == 0]
 
@@ -70,11 +47,6 @@ def balance_table(
     covariate_cols: list,
     treatment_col: str,
 ) -> pd.DataFrame:
-    """
-    Combines pre- and post-matching SMD into a single table, one row per
-    covariate, for direct before/after comparison. This is the data
-    backing the love plot.
-    """
     smd_before = compute_smd(df_before, covariate_cols, treatment_col)
     smd_after = compute_smd(df_after, covariate_cols, treatment_col)
 
@@ -99,11 +71,6 @@ def balance_table(
 
 
 def love_plot(balance_df: pd.DataFrame, title: str = "Covariate Balance"):
-    """
-    Renders a love plot (SMD before vs after matching, one row per
-    covariate) using matplotlib. Returns the figure so the caller
-    (notebook or Streamlit dashboard) decides whether to show or save it.
-    """
     import matplotlib.pyplot as plt
 
     sorted_df = balance_df.sort_values("smd_before", key=abs)
@@ -130,13 +97,6 @@ def overlap_diagnostics(
     propensity_col: str,
     treatment_col: str,
 ) -> dict:
-    """
-    Summarizes propensity score overlap between treated and control arms:
-    per-group range, the overlapping region, and the share of the sample
-    that falls outside common support under both the overlap rule and a
-    fixed [0.1, 0.9] band. Reuses apply_common_support_trim from
-    estimators.py so the trimming logic isn't duplicated, just reported on.
-    """
     treated_ps = df.loc[df[treatment_col] == 1, propensity_col]
     control_ps = df.loc[df[treatment_col] == 0, propensity_col]
 
@@ -174,17 +134,6 @@ def run_full_diagnostics(
     propensity_col: str,
     caliper: float = 0.2,
 ) -> dict:
-    """
-    Convenience wrapper bundling balance and overlap diagnostics into one
-    call. This is the object the Section 4 LLM critique step reads from,
-    so its keys are kept flat and simple rather than deeply nested.
-
-    Takes only the pre-matching dataframe (with propensity already
-    attached) and builds the matched sample internally via
-    get_matched_pairs, so "before" and "after" balance are computed on
-    the correct pair of samples rather than requiring the caller to pass
-    a matched dataframe constructed elsewhere.
-    """
     matched = get_matched_pairs(df_before, treatment_col, propensity_col, caliper)
 
     balance = balance_table(df_before, matched, covariate_cols, treatment_col)

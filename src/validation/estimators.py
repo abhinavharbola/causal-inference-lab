@@ -1,16 +1,3 @@
-"""
-Section 1 estimator comparison: naive OLS, propensity score matching
-(PSM), inverse propensity weighting (IPW), and augmented IPW (AIPW /
-doubly robust). Each estimator takes a dataframe and returns a scalar
-point estimate, so they compose directly with bootstrap_ci /
-bootstrap_diff_in_means from utils.bootstrap.
-
-Difference-in-differences is not implemented here. Criteo's rows are
-independent user-level observations from a single exposure window with
-no pre/post treatment structure, so there is no usable time dimension
-for DiD. This is a documented drop, not an oversight.
-"""
-
 import logging
 
 import numpy as np
@@ -30,12 +17,6 @@ def naive_ols_ate(
     treatment_col: str,
     covariate_cols: list = None,
 ) -> float:
-    """
-    OLS regression of outcome on treatment, optionally adjusting for
-    covariates. Without covariates this is equivalent to a simple
-    difference in means. This is the baseline estimator expected to show
-    growing bias as confounding severity increases.
-    """
     cols = [treatment_col] + (covariate_cols or [])
     X = sm.add_constant(df[cols])
     y = df[outcome_col]
@@ -50,18 +31,6 @@ def fit_propensity_score(
     covariate_cols: list,
     max_iter: int = 5000,
 ) -> np.ndarray:
-    """
-    Fits a logistic regression propensity model and returns predicted
-    P(T=1 | X) for every row. Used by PSM, IPW, and AIPW so propensity
-    estimation isn't duplicated across estimators.
-
-    Features are standardized before fitting. Development/testing used
-    standard-normal synthetic covariates, which converge under lbfgs
-    regardless of scaling; a real run against actual Criteo data (whose
-    f0-f11 scales aren't controlled by this project) surfaced an lbfgs
-    non-convergence warning without it, so scaling was added and max_iter
-    raised as a second line of defense.
-    """
     X = df[covariate_cols].to_numpy()
     T = df[treatment_col].to_numpy()
 
@@ -69,7 +38,6 @@ def fit_propensity_score(
     model.fit(X, T)
     propensity = model.predict_proba(X)[:, 1]
 
-    # Clip away from 0/1 to avoid division blowups in IPW/AIPW downstream.
     propensity = np.clip(propensity, 1e-3, 1 - 1e-3)
     return propensity
 
@@ -81,15 +49,6 @@ def apply_common_support_trim(
     method: str = "overlap",
     fixed_bounds: tuple = (0.1, 0.9),
 ) -> pd.DataFrame:
-    """
-    Drops units outside common support before matching/weighting.
-
-    method='overlap': trims to the region where treated and control
-    propensity distributions actually overlap (min/max of the opposite
-    group), the standard Crump-style approach.
-    method='fixed': trims to a fixed propensity band (default [0.1, 0.9]),
-    simpler but less data-driven.
-    """
     treated_ps = df.loc[df[treatment_col] == 1, propensity_col]
     control_ps = df.loc[df[treatment_col] == 0, propensity_col]
 
@@ -123,13 +82,6 @@ def psm_ate(
     propensity_col: str,
     caliper: float = 0.2,
 ) -> float:
-    """
-    Nearest-neighbor propensity score matching with a caliper, matching
-    each treated unit to its nearest control on the propensity score.
-    Caliper is expressed in standard deviations of the propensity score
-    (the standard convention), converted internally to a raw distance.
-    Unmatched treated units (no control within caliper) are dropped.
-    """
     matched = get_matched_pairs(df, treatment_col, propensity_col, caliper)
 
     matched_treated_outcomes = matched.loc[matched[treatment_col] == 1, outcome_col].to_numpy()
@@ -144,18 +96,6 @@ def get_matched_pairs(
     propensity_col: str,
     caliper: float = 0.2,
 ) -> pd.DataFrame:
-    """
-    Builds the actual matched sample (matched treated units + their
-    nearest-neighbor matched controls) and returns it as a single
-    dataframe with a `_pair_id` column linking each pair.
-
-    This is the dataframe that should be used for post-matching balance
-    diagnostics (SMD, love plots). A common-support-trimmed dataframe is
-    NOT the same thing as a matched dataframe: trimming only removes
-    units outside the overlap region, it does not pair treated units to
-    their nearest control, so balance computed on a merely-trimmed sample
-    understates how much matching actually improves balance.
-    """
     treated = df[df[treatment_col] == 1].reset_index(drop=True)
     control = df[df[treatment_col] == 0].reset_index(drop=True)
 
@@ -191,17 +131,6 @@ def ipw_ate(
     treatment_col: str,
     propensity_col: str,
 ) -> float:
-    """
-    Stabilized (Hajek-normalized) inverse propensity weighted ATE:
-        mu1 = sum(T*Y/e) / sum(T/e)
-        mu0 = sum((1-T)*Y/(1-e)) / sum((1-T)/(1-e))
-        ATE = mu1 - mu0
-
-    Normalizing by the sum of weights rather than the raw group count is
-    what keeps this a valid weighted mean; dividing by group count alone
-    does not, and produces wildly biased estimates whenever propensity
-    scores are not close to 0.5.
-    """
     T = df[treatment_col].to_numpy()
     Y = df[outcome_col].to_numpy()
     e = df[propensity_col].to_numpy()
@@ -220,16 +149,6 @@ def aipw_ate(
     propensity_col: str,
     max_iter: int = 5000,
 ) -> float:
-    """
-    Augmented IPW (doubly robust) estimator. Fits separate outcome models
-    on the treated and control arms, then combines the outcome-model
-    predictions with an IPW correction term. Robust to misspecification
-    of either the propensity model or the outcome model, as long as one
-    of the two is correctly specified.
-
-    Features are standardized before fitting, same rationale as
-    fit_propensity_score above.
-    """
     T = df[treatment_col].to_numpy()
     Y = df[outcome_col].to_numpy()
     e = df[propensity_col].to_numpy()
@@ -257,12 +176,6 @@ def run_estimator_comparison(
     caliper: float = 0.2,
     trim_method: str = "overlap",
 ) -> dict:
-    """
-    Runs all four estimators (naive OLS, PSM, IPW, AIPW) on the same
-    dataframe and returns point estimates in one call. Intended to be
-    looped across confounding severities for the Section 1 bias-severity
-    curve, one call per severity level.
-    """
     propensity = fit_propensity_score(df, treatment_col, covariate_cols)
     df = df.copy()
     df["_propensity"] = propensity

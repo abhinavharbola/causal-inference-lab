@@ -1,17 +1,3 @@
-"""
-Shared power-analysis machinery, used in three places across the project:
-
-1. Section 1.5: MDE comparison between `visit` and `conversion` at the
-   planned Section 2 subsample size, to justify the outcome variable choice.
-2. Section 1: power curves for the validation pipeline, characterizing
-   how much data the estimator comparison needs to be trustworthy.
-3. Section 3: per-segment power analysis, to show whether naive per-segment
-   tests are underpowered once the sample is split into clusters.
-
-All three reuse the same NormalIndPower / proportion_effectsize machinery,
-no duplicated stats code between sections.
-"""
-
 import logging
 import math
 from dataclasses import dataclass
@@ -39,21 +25,6 @@ class MDEResult:
 
 
 def _effect_size_to_absolute_mde(baseline_rate: float, effect_size_h: float) -> float:
-    """
-    Inverts Cohen's h back to an absolute proportion difference given a
-    fixed baseline rate. h = 2*arcsin(sqrt(p1)) - 2*arcsin(sqrt(p2)).
-
-    solve_power's reverse solve (given n, alpha, power) always returns a
-    positive effect-size magnitude, regardless of direction. Since this
-    project cares about the uplift direction (treatment increases
-    visit/conversion probability), the positive h must be ADDED to phi1
-    to recover the increase direction, not subtracted: subtracting would
-    silently compute the decrease direction instead, which — because the
-    arcsine transform is nonlinear — is not the same absolute magnitude
-    as the increase direction, especially at low base rates. Confirmed
-    during testing: subtracting produced an MDE of 0.00475 for a true
-    0.005 effect at a 4.5% baseline, a systematic ~5% understatement.
-    """
     phi1 = 2 * math.asin(math.sqrt(baseline_rate))
     phi2 = phi1 + effect_size_h
     p2 = math.sin(phi2 / 2) ** 2
@@ -67,10 +38,6 @@ def calculate_mde(
     alpha: float = 0.05,
     power: float = 0.8,
 ) -> MDEResult:
-    """
-    Given a baseline rate and a fixed sample size per arm, back-calculates
-    the minimum detectable effect (MDE) at the given alpha/power.
-    """
     effect_size_h = _power_calc.solve_power(
         effect_size=None,
         nobs1=n_per_group,
@@ -101,12 +68,6 @@ def mde_comparison_table(
     alpha: float = 0.05,
     power: float = 0.8,
 ) -> pd.DataFrame:
-    """
-    Builds the Section 1.5 comparison table: for each outcome (e.g.
-    'visit', 'conversion'), what effect size can be detected at the
-    planned subsample size. This is the artifact that justifies which
-    outcome Sections 2 and 3 use.
-    """
     rows = []
     for outcome_name, baseline_rate in baseline_rates.items():
         result = calculate_mde(outcome_name, baseline_rate, n_per_group, alpha, power)
@@ -137,12 +98,6 @@ def required_sample_size(
     alpha: float = 0.05,
     power: float = 0.8,
 ) -> int:
-    """
-    Back-calculates the required per-arm sample size to detect a known
-    true effect size at the given alpha/power. Used in Section 1 to show
-    how much data the validation pipeline needs to reliably distinguish
-    naive bias from the ground-truth effect.
-    """
     p1 = baseline_rate
     p2 = baseline_rate + true_effect_absolute
     effect_size_h = proportion_effectsize(p1, p2)
@@ -164,13 +119,6 @@ def power_curve(
     n_range: np.ndarray,
     alpha: float = 0.05,
 ) -> pd.DataFrame:
-    """
-    Computes achieved statistical power across a range of sample sizes,
-    for a fixed true effect. Used in Section 1 to visualize where the
-    estimator comparison starts to have adequate power, and referenced
-    by the Section 1.5 MDE table as the same underlying tool used for
-    a different purpose (n->power here, n->effect there).
-    """
     p1 = baseline_rate
     p2 = baseline_rate + true_effect_absolute
     effect_size_h = proportion_effectsize(p1, p2)
@@ -198,21 +146,6 @@ def segment_power_analysis(
     alpha: float = 0.05,
     power_threshold: float = 0.8,
 ) -> pd.DataFrame:
-    """
-    Section 3: given per-segment sample sizes (after splitting the full
-    sample into clusters/business segments), computes achieved power for
-    each segment at the known or assumed true effect size, and flags
-    segments that are underpowered. This is meant to surface the common
-    real-world mistake of running per-segment tests without checking
-    whether the segment is even large enough to detect the effect.
-
-    treatment_share: fraction of each segment in the treatment arm.
-    Criteo's actual treatment/control split is closer to 85/15 than 50/50
-    (see data_loader.EXPECTED_TREATMENT_SHARE_*), so this is parameterized
-    rather than assumed balanced. Unequal arm sizes reduce achieved power
-    relative to a balanced split at the same total n, which is exactly
-    the kind of thing this check exists to catch.
-    """
     p1 = baseline_rate
     p2 = baseline_rate + true_effect_absolute
     effect_size_h = proportion_effectsize(p1, p2)
@@ -242,8 +175,6 @@ def segment_power_analysis(
             )
             continue
 
-        # statsmodels convention: nobs1 is the reference group, ratio = nobs2 / nobs1.
-        # Control is used as the reference group here.
         ratio = n_treatment / n_control
 
         achieved_power = _power_calc.solve_power(

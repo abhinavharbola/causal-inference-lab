@@ -1,20 +1,3 @@
-"""
-Shared confidence-interval machinery for Section 1 (validation) and
-Section 2 (per-segment CATE estimates).
-
-Two distinct tools live here, not one, because they solve different
-problems:
-
-- `bootstrap_ci` / `bootstrap_diff_in_means`: for estimators without a
-  clean closed-form variance (PSM, IPW, AIPW, per-segment CATE). Uses
-  stratified resampling to preserve the treatment/control ratio within
-  each bootstrap draw.
-- `analytic_ci_diff_in_proportions`: for the full-dataset ground-truth
-  ATE (n ~ 13M), where a Wald normal-approximation CI is already exact
-  for practical purposes. Bootstrapping at that scale burns CPU/RAM for
-  no statistical gain, so it is deliberately not used there.
-"""
-
 import logging
 
 import numpy as np
@@ -31,12 +14,6 @@ def analytic_ci_diff_in_proportions(
     n2: int,
     alpha: float = 0.05,
 ) -> dict:
-    """
-    Wald CI for the difference in two proportions (p1 - p2), using the
-    normal approximation. Appropriate for large n only (rule of thumb:
-    n*p and n*(1-p) both > ~10 for each group). Intended for the
-    full-dataset ground-truth ATE, not for smaller confounded subsamples.
-    """
     se = np.sqrt(p1 * (1 - p1) / n1 + p2 * (1 - p2) / n2)
     z = stats.norm.ppf(1 - alpha / 2)
     diff = p1 - p2
@@ -58,13 +35,6 @@ def bootstrap_diff_in_means(
     alpha: float = 0.05,
     random_state: int = None,
 ) -> dict:
-    """
-    Stratified bootstrap CI for a simple difference-in-means ATE.
-    Resamples treatment and control arms independently (with replacement,
-    same size as original arm) on every iteration, which preserves the
-    treatment/control ratio rather than resampling the pooled data and
-    risking a draw with a distorted ratio.
-    """
     rng = np.random.default_rng(random_state)
     n_treat = len(treatment_outcomes)
     n_control = len(control_outcomes)
@@ -99,17 +69,6 @@ def bootstrap_ci(
     stratify_col: str = None,
     random_state: int = None,
 ) -> dict:
-    """
-    General-purpose bootstrap CI for any estimator that takes a dataframe
-    and returns a scalar point estimate. Used for PSM/IPW/AIPW and
-    per-segment CATE, where the estimator itself is a black box from the
-    CI machinery's point of view.
-
-    If stratify_col is given (typically the treatment indicator), each
-    bootstrap draw resamples within each stratum separately and
-    concatenates, preserving stratum proportions. Otherwise resamples the
-    whole dataframe with replacement.
-    """
     rng = np.random.default_rng(random_state)
     n = len(df)
 
@@ -154,5 +113,4 @@ def bootstrap_ci(
 
 
 def ci_excludes_value(ci_lower: float, ci_upper: float, value: float) -> bool:
-    """Convenience check used by the confounding validation gate."""
     return value < ci_lower or value > ci_upper

@@ -1,23 +1,3 @@
-"""
-Loads the Criteo Uplift Modeling Dataset (v2.1) and validates it against
-documented expected structure before anything downstream touches it.
-
-Primary loader: Hugging Face `datasets.load_dataset("criteo/criteo-uplift")`.
-Fallback loader: `sklift.datasets.fetch_criteo` if Hugging Face is unreachable.
-
-Schema (v2.1, confirmed against dataset card and sklift docs):
-    f0..f11    : 12 dense float covariates
-    treatment  : binary, 1 = treated, 0 = control
-    exposure   : binary, effective exposure flag (v2.1 addition over v1)
-    conversion : binary label, base rate ~0.3%
-    visit      : binary label, base rate ~4-5%
-
-Expected row count is documented as ~13.9M for v2.1. Exact figure is not
-hardcoded here because it has not been verified against a live pull; the
-integrity check uses a tolerance band and logs the actual count so the
-exact value can be pinned once confirmed on a real run.
-"""
-
 import logging
 
 import pandas as pd
@@ -30,9 +10,6 @@ EXPECTED_COLUMNS = EXPECTED_FEATURE_COLUMNS + ["treatment", "exposure", "convers
 EXPECTED_ROW_COUNT_MIN = 13_000_000
 EXPECTED_ROW_COUNT_MAX = 14_500_000
 
-# Documented approximate base rates / split ratios (Diemert et al. 2018, sklift docs).
-# Used as a sanity band, not an exact match, since these are population-level
-# approximations rather than guaranteed constants.
 EXPECTED_TREATMENT_SHARE_MIN = 0.80
 EXPECTED_TREATMENT_SHARE_MAX = 0.90
 EXPECTED_VISIT_RATE_MIN = 0.03
@@ -96,11 +73,6 @@ def _check_outcome_rates(df: pd.DataFrame) -> None:
 
 
 def run_integrity_check(df: pd.DataFrame) -> None:
-    """
-    Runs all integrity checks against documented v2.1 values.
-    Raises DataIntegrityError on any failure. Fails loudly by design;
-    provenance should never be an unexamined assumption.
-    """
     _check_columns(df)
     _check_row_count(df)
     _check_treatment_split(df)
@@ -127,11 +99,6 @@ def _load_from_sklift() -> pd.DataFrame:
 
 
 def load_criteo_uplift(validate: bool = True) -> pd.DataFrame:
-    """
-    Loads the Criteo Uplift v2.1 dataset, trying Hugging Face first and
-    falling back to sklift if Hugging Face is unreachable. Runs an
-    integrity check immediately after load unless validate=False.
-    """
     try:
         logger.info("Attempting load from Hugging Face (criteo/criteo-uplift)")
         df = _load_from_huggingface()

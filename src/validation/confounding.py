@@ -1,26 +1,3 @@
-"""
-Section 1: artificially confounds a subsample of the (randomized) Criteo
-data by biasing which units are retained, so the validation pipeline can
-be checked against a known ground-truth ATE.
-
-Retention rule:
-    retention_probability = sigmoid(g0 + g1*X + g2*X*T)
-
-g2 controls confounding strength. Non-zero g2 makes retention depend on
-the interaction of covariate and treatment arm, which is what actually
-correlates X with T in the retained sample. A rule with g2=0 (or an X
-uncorrelated with the outcome) would not reliably bias a treatment effect
-estimate in randomized data, so two things are enforced here:
-
-1. X is selected by correlation with the outcome, not chosen arbitrarily
-   (see `select_confounding_covariate`). An outcome-irrelevant X can make
-   the calibration loop chase a validation gate that never trips, no
-   matter how high g2 goes.
-2. A validation gate (see `check_confounding_validity`) verifies the
-   induced confounding actually did something, before any estimator
-   comparison runs on the retained sample.
-"""
-
 import logging
 
 import numpy as np
@@ -37,13 +14,6 @@ def select_confounding_covariate(
     outcome_col: str,
     candidate_cols: list,
 ) -> str:
-    """
-    Picks the candidate covariate with the strongest absolute correlation
-    to the outcome. This is a prerequisite for the retention rule to
-    produce real confounding: if X doesn't correlate with the outcome,
-    biasing retention by X*T interaction won't bias the treatment effect
-    estimate, and the calibration loop below will never converge.
-    """
     correlations = {}
     for col in candidate_cols:
         corr = df[col].corr(df[outcome_col])
@@ -84,12 +54,6 @@ def induce_confounding(
     g2: float,
     random_state: int = None,
 ) -> pd.DataFrame:
-    """
-    Samples a retained subsample from df according to the retention rule.
-    X is standardized before computing retention probability so that g0/g1/g2
-    have a consistent, interpretable scale regardless of the raw covariate's
-    range.
-    """
     rng = np.random.default_rng(random_state)
 
     X_raw = df[x_col].to_numpy()
@@ -119,20 +83,6 @@ def check_confounding_validity(
     ground_truth_ci: tuple,
     corr_alpha: float = 0.05,
 ) -> dict:
-    """
-    Validation gate. Checks two conditions on the retained subsample:
-
-    (a) correlation(X, T) is significantly nonzero (it should be ~0 in
-        the untouched randomized data, so a nonzero correlation here
-        confirms the retention rule actually broke randomization).
-    (b) naive difference-in-means on the retained subsample falls outside
-        the bootstrap/analytic CI of the ground-truth ATE (confirms the
-        induced confounding actually biases the naive estimate, not just
-        that X and T happen to correlate without moving the estimate).
-
-    Both must hold for the confounding severity to be considered valid;
-    if either fails, g2 needs to be increased and retention resampled.
-    """
     X = retained_df[x_col].to_numpy()
     T = retained_df[treatment_col].to_numpy()
 
@@ -174,17 +124,6 @@ def calibrate_confounding(
     max_iters: int = 10,
     random_state: int = None,
 ) -> dict:
-    """
-    Calibration loop: starts at g2_init and increases g2 by g2_step until
-    the validation gate passes or max_iters is reached. Returns the final
-    g2, the retained subsample at that g2, and the full iteration history
-    so a failed calibration is visible rather than silently accepted.
-
-    Hard-capped at max_iters. If the gate never passes, this is treated
-    as a build-time flag, not an infinite loop: the last attempt's
-    diagnostics are returned along with converged=False so the caller can
-    fall back to a manually chosen g2 grid instead of assuming convergence.
-    """
     history = []
     g2 = g2_init
     last_retained = None
@@ -247,13 +186,6 @@ def run_dose_response_confounding(
     g1: float = 0.0,
     random_state: int = None,
 ) -> dict:
-    """
-    Runs induce_confounding at several fixed g2 severities (dose-response
-    design), rather than a single calibrated point. Default severities are
-    illustrative starting points; the calibration loop above should be
-    used first to find a g2 that reliably trips the validation gate, and
-    that value can anchor the 'strong' end of this grid.
-    """
     if severities is None:
         severities = {"none": 0.0, "mild": 0.5, "moderate": 1.5, "strong": 3.0}
 
