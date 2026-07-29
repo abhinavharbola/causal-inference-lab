@@ -1,25 +1,3 @@
-"""
-The one and only place an LLM appears in this project.
-
-Reads the balance table, overlap diagnostics, and Rosenbaum sensitivity
-output from Section 1 and Section 4, and produces a short plain-language
-flag of likely assumption violations for a non-technical stakeholder.
-
-This does NOT generate narrative reports, does NOT summarize the whole
-project, does NOT write the README, and is not used anywhere in Section
-2 or 3. Any temptation to reach for the LLM elsewhere in the build should
-be resisted; solve it with code and statistics instead.
-
-Provider: Groq (primary) or NVIDIA NIM (fallback), both free tier.
-Both expose an OpenAI-compatible chat completions interface, so the same
-request shape works for either with only the base_url/model swapped.
-
-If neither provider is reachable (no API key set, network unavailable),
-falls back to a deterministic rule-based flag generator so the pipeline
-doesn't hard-fail end-to-end just because a key isn't configured, e.g.
-during local testing.
-"""
-
 import logging
 import os
 
@@ -35,19 +13,11 @@ plain language, with no jargon left unexplained. Do not summarize the whole anal
 write a report, do not add caveats beyond what the numbers given to you support. If the \
 diagnostics look clean, say so plainly instead of inventing a concern."""
 
-# Model names on free-tier providers change fairly often; confirm current
-# availability at build time against https://console.groq.com/docs/models
-# or https://build.nvidia.com before relying on these defaults.
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 DEFAULT_NIM_MODEL = "openai/gpt-oss-120b"
 
 
 def format_diagnostics_summary(diagnostics: dict, rosenbaum_result: dict) -> str:
-    """
-    Formats the Section 1/4 diagnostic objects into a compact text block
-    for the LLM prompt. Deliberately terse: this is input to a single
-    bounded critique step, not a document in its own right.
-    """
     balance_df: pd.DataFrame = diagnostics["balance_table"]
     overlap: dict = diagnostics["overlap"]
     critical: dict = rosenbaum_result["critical_gamma_result"]
@@ -121,14 +91,6 @@ def _call_nim(prompt: str, model: str, api_key: str) -> str:
 
 
 def _rule_based_fallback(diagnostics: dict, rosenbaum_result: dict) -> str:
-    """
-    Deterministic, non-LLM fallback used only when no provider is
-    reachable. Mirrors the kind of flags an LLM call would produce, so
-    the pipeline stays runnable without a configured API key, but this
-    path should not be mistaken for the actual LLM critique step in the
-    README or dashboard: label output from this path as "fallback"
-    wherever it is displayed.
-    """
     balance_df: pd.DataFrame = diagnostics["balance_table"]
     overlap: dict = diagnostics["overlap"]
     critical: dict = rosenbaum_result["critical_gamma_result"]
@@ -178,15 +140,6 @@ def run_diagnostic_critique(
     groq_model: str = DEFAULT_GROQ_MODEL,
     nim_model: str = DEFAULT_NIM_MODEL,
 ) -> dict:
-    """
-    Runs the single bounded LLM critique step. Tries the requested
-    provider first (default Groq), falls back to the other provider if
-    that fails, and falls back to a deterministic rule-based summary if
-    neither is reachable (e.g. no API key configured).
-
-    API keys are read from GROQ_API_KEY / NVIDIA_NIM_API_KEY environment
-    variables if not passed explicitly.
-    """
     groq_api_key = groq_api_key or os.environ.get("GROQ_API_KEY")
     nim_api_key = nim_api_key or os.environ.get("NVIDIA_NIM_API_KEY")
 

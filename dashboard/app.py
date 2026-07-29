@@ -1,31 +1,3 @@
-"""
-Streamlit dashboard covering the full pipeline: Section 1 (validation
-bias-severity curve), Section 1.5 (outcome variable MDE justification),
-Section 2 (heterogeneity/segmentation + Qini), Section 3 (BH-corrected
-segment significance + per-segment power), Section 4 (Rosenbaum
-sensitivity + LLM critique).
-
-Data contract: this dashboard is a visualization layer, not a
-recomputation engine. It expects two kinds of precomputed input:
-
-1. Estimation runs logged via src.utils.db (Supabase or local SQLite),
-   one row per method x confounding-severity combination from Section 1.
-2. Flat files under data/processed/, written by the notebooks after
-   running the actual pipeline:
-     - ground_truth.json       {"ate": float, "ci_lower": float, "ci_upper": float}
-     - balance_table.csv       output of diagnostics.balance_table
-     - segment_effects.csv     output of segmentation.compute_segment_effects
-                               (+ BH correction columns from evaluation.apply_benjamini_hochberg)
-     - segment_power.csv       output of power_analysis.segment_power_analysis
-     - qini_curve.json         {"curve_x": [...], "curve_y": [...], "qini_coefficient": float}
-     - rosenbaum_bounds.csv    output of rosenbaum.compute_rosenbaum_bounds
-     - critique.json           output of critique.run_diagnostic_critique
-
-If an expected file is missing, the relevant section shows an info
-message rather than crashing, since the dashboard may be opened before
-the corresponding notebook section has been run.
-"""
-
 import json
 import os
 import sys

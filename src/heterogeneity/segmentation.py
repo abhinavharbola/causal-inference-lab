@@ -1,19 +1,3 @@
-"""
-Section 2/3: segments users either via a simple business-relevant
-quantile split on a chosen covariate, or via unsupervised clustering on
-pre-treatment covariates, then measures the treatment effect per segment.
-
-Clustering exists specifically to answer "does response differ by
-segment," not as a standalone unsupervised demo: compute_segment_effects
-is the function that turns a segment assignment into the actual causal
-question this project cares about.
-
-Criteo's covariates (f0-f11) are anonymized dense floats, not literal
-recency/frequency/value fields, so "business-relevant split" here means
-a quantile split on a chosen covariate (e.g. the one most predictive of
-CATE) rather than a literal RFM segmentation.
-"""
-
 import logging
 
 import numpy as np
@@ -33,13 +17,6 @@ def quantile_segments(
     n_bins: int = 4,
     labels: list = None,
 ) -> pd.Series:
-    """
-    Business-style segmentation: splits units into n_bins quantile-based
-    groups on a single chosen covariate. Simpler and more interpretable
-    than clustering when a single covariate already captures most of the
-    business-relevant variation (e.g. the covariate most correlated with
-    CATE or with the outcome).
-    """
     if labels is None:
         labels = [f"q{i+1}" for i in range(n_bins)]
 
@@ -53,12 +30,6 @@ def cluster_segments(
     n_clusters: int = 4,
     random_state: int = None,
 ) -> pd.Series:
-    """
-    Unsupervised segmentation: standardizes the given pre-treatment
-    covariates and runs KMeans. Returns cluster labels as strings
-    ('cluster_0', 'cluster_1', ...) so segment labels are consistent in
-    type with quantile_segments' output.
-    """
     X = df[feature_cols].to_numpy()
     X_scaled = StandardScaler().fit_transform(X)
 
@@ -79,17 +50,6 @@ def compute_segment_effects(
     alpha: float = 0.05,
     random_state: int = None,
 ) -> pd.DataFrame:
-    """
-    For each segment, computes:
-    - naive difference-in-means treatment effect
-    - bootstrap CI (via bootstrap_diff_in_means, stratified within segment)
-    - a two-proportion z-test p-value (feeds into Section 3's
-      Benjamini-Hochberg correction across segments, done in evaluation.py)
-    - segment sample size (n_segment) and per-arm sizes
-
-    Also attaches mean estimated CATE per segment if a 'cate' column is
-    present in df, as a cross-check against the naive per-segment estimate.
-    """
     rows = []
     has_cate = "cate" in df.columns
 

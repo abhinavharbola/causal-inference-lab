@@ -1,35 +1,3 @@
-"""
-Section 2: T-learner CATE estimation on the full untouched randomized
-Criteo data (visit as outcome).
-
-T-learner is used as the primary method rather than a causal forest:
-simpler, more interpretable, and easier to defend and explain than a
-causal forest in an interview setting. Causal forest / X-learner is
-documented as a natural extension in the README, not built here, to
-protect feasibility.
-
-Base classifiers are calibrated (CalibratedClassifierCV) rather than
-used raw. Visit has a low base rate (~4-5%), and uncalibrated
-probability estimates from tree-based or even logistic models can be
-systematically off at that base rate, which then directly noises up the
-CATE difference (mu1_hat - mu0_hat), since CATE is a difference of two
-already-imperfect probability estimates.
-
-The default base estimator standardizes features before fitting logistic
-regression. Development/testing used standard-normal synthetic features,
-which converge under lbfgs regardless of scaling, so this wasn't caught
-until a real run against actual Criteo data surfaced both an lbfgs
-non-convergence warning and an implausibly wide CATE range (consistent
-with unscaled features destabilizing both the logistic fit and the
-isotonic calibration in sparse regions of an unscaled feature space).
-Calibration defaults to 'sigmoid' (Platt scaling) rather than 'isotonic':
-sigmoid is a simple 2-parameter fit and much less prone to producing
-erratic extreme values in sparse folds, which matters here since the
-control arm is meaningfully smaller than the treated arm (~15% of the
-sample at Criteo's actual treatment share) and gets split further by
-cross-validation during calibration.
-"""
-
 import logging
 
 import numpy as np
@@ -57,18 +25,6 @@ def fit_t_learner(
     calibration_method: str = "sigmoid",
     cv: int = 3,
 ) -> dict:
-    """
-    Fits two separate outcome models, one on treated units and one on
-    control units, each predicting P(outcome=1 | X). CATE is the
-    difference in their predictions at inference time.
-
-    base_estimator defaults to a StandardScaler + LogisticRegression
-    pipeline, a reasonable and cheap default given the CPU-only
-    constraint; swap in a tree-based model if the covariates show clear
-    nonlinearity, but scale and recalibrate either way. If you pass a
-    custom base_estimator, this function does not add scaling for you —
-    build scaling into your own pipeline if your estimator needs it.
-    """
     if base_estimator is None:
         base_estimator = _default_base_estimator()
 
@@ -107,12 +63,6 @@ def fit_t_learner(
 
 
 def predict_cate(models: dict, df: pd.DataFrame) -> np.ndarray:
-    """
-    Predicts CATE = P(outcome=1 | X, T=1) - P(outcome=1 | X, T=0) for
-    every row in df, regardless of that row's actual treatment status.
-    This is the whole point of the T-learner: predict both potential
-    outcomes for every unit.
-    """
     X = df[models["feature_cols"]].to_numpy()
 
     p1 = models["model_treated"].predict_proba(X)[:, 1]
@@ -133,14 +83,6 @@ def t_learner_pipeline(
     test_size: float = 0.3,
     random_state: int = None,
 ) -> dict:
-    """
-    Full Section 2 CATE pipeline: splits into train/holdout (stratified
-    by treatment so both arms are represented in each split), fits the
-    T-learner on train, predicts CATE on the holdout set, and returns
-    everything downstream evaluation (Qini/uplift curve) and segmentation
-    need: the holdout dataframe with a `cate` column attached, plus the
-    fitted models for reuse.
-    """
     train_df, holdout_df = train_test_split(
         df,
         test_size=test_size,
