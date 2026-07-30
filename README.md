@@ -20,45 +20,55 @@ Every method here serves that narrative. Nothing was added just to check a skill
 
 ## Dashboard Preview
 
-Screenshots from `streamlit run dashboard/app.py`, one per pipeline section.
+Click any screenshot to view it full size.
 
-<p align="center">
-  <img src="assets/01_validation.png" width="800" alt="Validation tab: bias-severity curve and covariate balance diagnostics">
-  <br>
-  <sub><b>Section 1 — Validation.</b> Bias-severity curve across confounding severities against the ground-truth ATE, plus post-matching covariate balance.</sub>
-</p>
+<table>
+<tr>
+<td align="center" width="50%">
+<a href="assets/01_validation.png">
+<img src="assets/01_validation.png" width="100%" alt="Validation">
+</a>
+<br><b>1. Validation</b><br>
+<sub>Bias-severity curve and covariate balance diagnostics.</sub>
+</td>
 
-<br>
+<td align="center" width="50%">
+<a href="assets/05_outcome_justification.png">
+<img src="assets/05_outcome_justification.png" width="100%" alt="Outcome Justification">
+</a>
+<br><b>1.5. Outcome Justification</b><br>
+<sub>Minimum detectable effect comparison.</sub>
+</td>
+</tr>
 
-<p align="center">
-  <img src="assets/05_outcome_justification.png" width="800" alt="Outcome Justification tab: MDE comparison between visit and conversion">
-  <br>
-  <sub><b>Section 1.5 — Outcome Justification.</b> Live MDE calculation showing why <code>visit</code>, not <code>conversion</code>, is used for segment-level work.</sub>
-</p>
+<tr>
+<td align="center">
+<a href="assets/02_heterogeneity.png">
+<img src="assets/02_heterogeneity.png" width="100%" alt="Heterogeneity">
+</a>
+<br><b>2. Heterogeneity</b><br>
+<sub>Segment-level CATE estimates and Qini evaluation.</sub>
+</td>
 
-<br>
+<td align="center">
+<a href="assets/03_statistical_rigor.png">
+<img src="assets/03_statistical_rigor.png" width="100%" alt="Statistical Rigor">
+</a>
+<br><b>3. Statistical Rigor</b><br>
+<sub>Multiple testing correction and power analysis.</sub>
+</td>
+</tr>
 
-<p align="center">
-  <img src="assets/02_heterogeneity.png" width="800" alt="Heterogeneity tab: segment-level CATE breakdown and Qini curve">
-  <br>
-  <sub><b>Section 2 — Heterogeneity.</b> Per-segment treatment effects with bootstrap CIs, and the Qini curve evaluating CATE model quality.</sub>
-</p>
-
-<br>
-
-<p align="center">
-  <img src="assets/03_statistical_rigor.png" width="800" alt="Statistical Rigor tab: Benjamini-Hochberg correction and per-segment power analysis">
-  <br>
-  <sub><b>Section 3 — Statistical Rigor.</b> Benjamini-Hochberg correction across segments, and per-segment power analysis flagging underpowered clusters.</sub>
-</p>
-
-<br>
-
-<p align="center">
-  <img src="assets/04_sensitivity.png" width="800" alt="Sensitivity tab: Rosenbaum bounds and LLM diagnostic critique">
-  <br>
-  <sub><b>Section 4 — Sensitivity.</b> Rosenbaum bounds on the PSM matched pairs, critical Gamma, and the bounded LLM diagnostic critique.</sub>
-</p>
+<tr>
+<td align="center" colspan="2">
+<a href="assets/04_sensitivity.png">
+<img src="assets/04_sensitivity.png" width="70%" alt="Sensitivity">
+</a>
+<br><b>4. Sensitivity Analysis</b><br>
+<sub>Rosenbaum bounds and diagnostic critique.</sub>
+</td>
+</tr>
+</table>
 
 ---
 
