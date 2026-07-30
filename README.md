@@ -62,7 +62,7 @@ Click any screenshot to view it full size.
 <tr>
 <td align="center" colspan="2">
 <a href="assets/04_sensitivity.png">
-<img src="assets/04_sensitivity.png" width="70%" alt="Sensitivity">
+<img src="assets/04_sensitivity.png" width="50%" alt="Sensitivity">
 </a>
 <br><b>4. Sensitivity Analysis</b><br>
 <sub>Rosenbaum bounds and diagnostic critique.</sub>
