@@ -86,10 +86,6 @@ Click any screenshot to view it full size.
 
 Loaded via `datasets.load_dataset("criteo/criteo-uplift")` (Hugging Face), with `sklift.datasets.fetch_criteo(target_col='all', treatment_col='all')` as an automatic fallback if Hugging Face is unreachable. An integrity check runs immediately after load, row count, column names, and treatment/control split ratio are all checked against documented values, and the load **fails loudly** on drift rather than silently continuing.
 
-### Why one dataset, not two
-
-An earlier version of this project used a second, older dataset (LaLonde, 1986) purely to provide a ground-truth check before trusting the pipeline on data without one. That role turned out to be redundant: Criteo is already randomized, so it already provides its own ground truth. Validation instead comes from artificially confounding a subsample of Criteo itself and checking recovery against the same dataset's true randomized answer.
-
 ### Why `visit`, not `conversion`
 
 Before any segment-level work begins, a minimum detectable effect (MDE) calculation (`statsmodels.stats.power.NormalIndPower`) checks what effect size each outcome can actually detect at the planned subsample size:
@@ -100,67 +96,6 @@ Before any segment-level work begins, a minimum detectable effect (MDE) calculat
 | `conversion` | ~0.3% | ~24.1% |
 
 `conversion`'s rarity means it can't support reliable per-segment estimation at CPU-feasible sample sizes. Consequence: **`visit` is the outcome for Sections 2 and 3.** `conversion` is used only for the full-dataset ground-truth ATE in Section 1, where n is large enough to be meaningful, and is explicitly excluded from segment-level work, this table is why, not an afterthought.
-
----
-
-## Pipeline
-
-### Section 1, Validation via self-induced confounding
-
-The ground-truth ATE is computed directly from the full randomized dataset (analytic Wald CI, bootstrapping ~13.9M rows would cost real compute for no statistical gain at that sample size).
-
-Confounding is induced with a parameterized retention rule, not by dropping units on an outcome-correlated covariate alone (which doesn't reliably bias a treatment effect estimate in already-randomized data):
-
-```
-retention_probability = sigmoid(g0 + g1·X + g2·X·T)
-```
-
-`X` is selected by correlation with the outcome, not arbitrarily, an outcome-irrelevant `X` would let `g2` grow indefinitely without ever biasing the naive estimate, since the whole point of the interaction term is that it only creates real confounding when `X` actually predicts the outcome.
-
-A **calibration loop** increases `g2` until a two-part validation gate passes: (a) `corr(X, T)` is significantly nonzero in the retained sample, and (b) the naive difference-in-means estimate falls outside the ground-truth CI. The loop is capped at `max_iters` and reports `converged: False` explicitly if the gate never trips, rather than looping forever or silently accepting an uncalibrated severity.
-
-The full estimator comparison, naive OLS, propensity score matching (with balance diagnostics), IPW, and AIPW, runs across four severities (none / mild / moderate / strong), producing the project's central diagnostic: a **bias-severity curve** showing naive estimation break down while matching/weighting stay comparatively robust.
-
-### Section 2, Heterogeneity
-
-A **T-learner** is the primary CATE method, simpler and more defensible to explain than a causal forest, which is documented as a future extension rather than built (see below). Base classifiers are calibrated (`CalibratedClassifierCV`), since `visit`'s low base rate makes uncalibrated probability estimates noisy in exactly the way that gets amplified by taking a difference of two of them.
-
-The T-learner's output is never assumed correct just because it ran, a **Qini coefficient** against a held-out split quantifies whether it actually ranks units by uplift better than random targeting.
-
-Users are segmented via unsupervised clustering on pre-treatment covariates (Criteo's covariates are anonymized floats, not literal recency/frequency/value fields, so clustering is the natural default; a business-style quantile split is available as a simpler alternative). Per-segment treatment effects are estimated with bootstrap confidence intervals.
-
-### Section 3, Statistical rigor
-
-Testing many segments at once inflates the false-positive rate, so **Benjamini-Hochberg correction** is applied before any segment is called significant. A **per-segment power analysis** separately checks whether each segment is even large enough to detect the effect size being claimed, a common real-world mistake this project deliberately surfaces rather than glosses over.
-
-### Section 4, Sensitivity analysis
-
-**Rosenbaum bounds** run specifically on the PSM matched-pairs output from Section 1, at the calibrated confounding severity, not on IPW/AIPW estimates, since Rosenbaum bounds are defined in terms of matched pairs and there's no equivalent structure for a weighting-based estimator. The output is the critical Gamma: how strong an unmeasured confounder would need to be, in odds-ratio terms, to overturn the matched-pairs conclusion.
-
-### The one LLM step
-
-A single diagnostic critique reads the balance table, overlap diagnostics, and Rosenbaum sensitivity output, and produces a short plain-language flag of likely assumption violations for a non-technical stakeholder. **Groq is the primary provider, NVIDIA NIM the fallback** (both free tier, both serving `openai/gpt-oss-120b`), with a deterministic rule-based fallback if neither is reachable. This is a small, clearly bounded diagnostic utility, it does not generate narrative reports, does not summarize the project, does not write this README, and is not used anywhere in Sections 2 or 3. Nothing else in this project calls an LLM.
-
----
-
-## Explicitly out of scope
-
-Documented here as deliberate decisions, not gaps in knowledge:
-
-- **Causal forest / X-learner**, a natural extension of the T-learner work, not built, to protect feasibility on a 16GB laptop.
-- **Recommendation systems**, a different problem family (ranking/retrieval), doesn't belong here.
-- **Deep learning**, not needed for this problem, and against the hard constraints below.
-- **MLflow/Dagshub experiment tracking**, that's a different project's territory; duplicating it here would dilute both.
-- **A second dataset for validation**, addressed above; Criteo's own randomization made it redundant.
-- **`conversion` as a segment-level outcome**, addressed above via the MDE calculation.
-- **Difference-in-differences**, Criteo's rows are independent single-exposure-window observations with no pre/post structure, so there's no usable time dimension for DiD.
-- **Any LLM usage beyond the one diagnostic critique step** described above.
-
-## Hard constraints
-
-- 16GB RAM, no GPU.
-- Free-tier cloud services only.
-- Every method included serves the causal narrative, nothing is here just to check a skill-list box.
 
 ---
 
@@ -211,10 +146,63 @@ causal-uplift-project/
 
 ---
 
+## Pipeline
+
+### Section 1: Validation via self-induced confounding
+
+The ground-truth ATE is computed directly from the full randomized dataset (analytic Wald CI, bootstrapping ~13.9M rows would cost real compute for no statistical gain at that sample size).
+
+Confounding is induced with a parameterized retention rule, not by dropping units on an outcome-correlated covariate alone (which doesn't reliably bias a treatment effect estimate in already-randomized data):
+
+```
+retention_probability = sigmoid(g0 + g1·X + g2·X·T)
+```
+
+`X` is selected by correlation with the outcome, not arbitrarily, an outcome-irrelevant `X` would let `g2` grow indefinitely without ever biasing the naive estimate, since the whole point of the interaction term is that it only creates real confounding when `X` actually predicts the outcome.
+
+A **calibration loop** increases `g2` until a two-part validation gate passes: (a) `corr(X, T)` is significantly nonzero in the retained sample, and (b) the naive difference-in-means estimate falls outside the ground-truth CI. The loop is capped at `max_iters` and reports `converged: False` explicitly if the gate never trips, rather than looping forever or silently accepting an uncalibrated severity.
+
+The full estimator comparison, naive OLS, propensity score matching (with balance diagnostics), IPW, and AIPW, runs across four severities (none / mild / moderate / strong), producing the project's central diagnostic: a **bias-severity curve** showing naive estimation break down while matching/weighting stay comparatively robust.
+
+### Section 2: Heterogeneity
+
+A **T-learner** is the primary CATE method, simpler and more defensible to explain than a causal forest, which is documented as a future extension rather than built (see below). Base classifiers are calibrated (`CalibratedClassifierCV`), since `visit`'s low base rate makes uncalibrated probability estimates noisy in exactly the way that gets amplified by taking a difference of two of them.
+
+The T-learner's output is never assumed correct just because it ran, a **Qini coefficient** against a held-out split quantifies whether it actually ranks units by uplift better than random targeting.
+
+Users are segmented via unsupervised clustering on pre-treatment covariates (Criteo's covariates are anonymized floats, not literal recency/frequency/value fields, so clustering is the natural default; a business-style quantile split is available as a simpler alternative). Per-segment treatment effects are estimated with bootstrap confidence intervals.
+
+### Section 3: Statistical rigor
+
+Testing many segments at once inflates the false-positive rate, so **Benjamini-Hochberg correction** is applied before any segment is called significant. A **per-segment power analysis** separately checks whether each segment is even large enough to detect the effect size being claimed, a common real-world mistake this project deliberately surfaces rather than glosses over.
+
+### Section 4: Sensitivity analysis
+
+**Rosenbaum bounds** run specifically on the PSM matched-pairs output from Section 1, at the calibrated confounding severity, not on IPW/AIPW estimates, since Rosenbaum bounds are defined in terms of matched pairs and there's no equivalent structure for a weighting-based estimator. The output is the critical Gamma: how strong an unmeasured confounder would need to be, in odds-ratio terms, to overturn the matched-pairs conclusion.
+
+### The one LLM step
+
+A single diagnostic critique reads the balance table, overlap diagnostics, and Rosenbaum sensitivity output, and produces a short plain-language flag of likely assumption violations for a non-technical stakeholder. **Groq is the primary provider, NVIDIA NIM the fallback** (both free tier, both serving `openai/gpt-oss-120b`), with a deterministic rule-based fallback if neither is reachable. This is a small, clearly bounded diagnostic utility, it does not generate narrative reports, does not summarize the project, does not write this README, and is not used anywhere in Sections 2 or 3. Nothing else in this project calls an LLM.
+
+---
+
+## Tech stack
+
+| Layer | Choice |
+|---|---|
+| Compute | Local CPU only, subsampled for CATE/estimator work |
+| Core libraries | `pandas`, `numpy`, `scikit-learn`, `statsmodels`, `scipy`, `scikit-uplift` |
+| Database | Supabase (primary), local SQLite (automatic fallback) |
+| Logging | Logfire (structured), console (automatic fallback) |
+| Dashboard | Streamlit |
+| LLM | Groq (primary) → NVIDIA NIM (fallback), both serving `openai/gpt-oss-120b`, free tier |
+
+---
+
 ## Setup
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/abhinavharbola/causal-impact-lab.git
 cd causal-uplift-project
 python -m venv venv
 source venv/bin/activate        # venv\Scripts\activate on Windows
@@ -262,18 +250,3 @@ pytest tests/ -v
 ```
 
 25 tests across `test_confounding.py`, `test_estimators.py`, and `test_power_analysis.py`, covering calibration convergence/non-convergence, estimator correctness on known synthetic data, and MDE/power calculation correctness.
-
----
-
-## Tech stack
-
-| Layer | Choice |
-|---|---|
-| Compute | Local CPU only, subsampled for CATE/estimator work |
-| Core libraries | `pandas`, `numpy`, `scikit-learn`, `statsmodels`, `scipy`, `scikit-uplift` |
-| Dashboard | Streamlit |
-| Database | Supabase (primary), local SQLite (automatic fallback) |
-| Logging | Logfire (structured), console (automatic fallback) |
-| LLM | Groq (primary) → NVIDIA NIM (fallback), both serving `openai/gpt-oss-120b`, free tier |
-
----
