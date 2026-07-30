@@ -18,6 +18,50 @@ Every method here serves that narrative. Nothing was added just to check a skill
 
 ---
 
+## Dashboard Preview
+
+Screenshots from `streamlit run dashboard/app.py`, one per pipeline section.
+
+<p align="center">
+  <img src="assets/01_validation.png" width="800" alt="Validation tab: bias-severity curve and covariate balance diagnostics">
+  <br>
+  <sub><b>Section 1 — Validation.</b> Bias-severity curve across confounding severities against the ground-truth ATE, plus post-matching covariate balance.</sub>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="assets/05_outcome_justification.png" width="800" alt="Outcome Justification tab: MDE comparison between visit and conversion">
+  <br>
+  <sub><b>Section 1.5 — Outcome Justification.</b> Live MDE calculation showing why <code>visit</code>, not <code>conversion</code>, is used for segment-level work.</sub>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="assets/02_heterogeneity.png" width="800" alt="Heterogeneity tab: segment-level CATE breakdown and Qini curve">
+  <br>
+  <sub><b>Section 2 — Heterogeneity.</b> Per-segment treatment effects with bootstrap CIs, and the Qini curve evaluating CATE model quality.</sub>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="assets/03_statistical_rigor.png" width="800" alt="Statistical Rigor tab: Benjamini-Hochberg correction and per-segment power analysis">
+  <br>
+  <sub><b>Section 3 — Statistical Rigor.</b> Benjamini-Hochberg correction across segments, and per-segment power analysis flagging underpowered clusters.</sub>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="assets/04_sensitivity.png" width="800" alt="Sensitivity tab: Rosenbaum bounds and LLM diagnostic critique">
+  <br>
+  <sub><b>Section 4 — Sensitivity.</b> Rosenbaum bounds on the PSM matched pairs, critical Gamma, and the bounded LLM diagnostic critique.</sub>
+</p>
+
+---
+
 ## Dataset
 
 **[Criteo Uplift Modeling Dataset, v2.1](https://huggingface.co/datasets/criteo/criteo-uplift)** (Diemert et al., 2018), ~13.9M rows from a real, randomized ad-exposure experiment in a live advertising system. v2.1 adds an `exposure` column on top of `treatment`. No registration or approval process required.
