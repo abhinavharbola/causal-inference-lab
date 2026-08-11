@@ -219,11 +219,12 @@ def inject_custom_css():
             border: 1px solid var(--border);
             border-radius: var(--radius);
             padding: 0.95rem 1.1rem 0.85rem 1.1rem;
-            min-height: 108px;
+            height: 128px;
             display: flex;
             flex-direction: column;
             justify-content: center;
             box-sizing: border-box;
+            overflow: hidden;
         }}
         [data-testid="stMetricLabel"] p {{
             font-family: 'IBM Plex Mono', monospace !important;
@@ -247,17 +248,10 @@ def inject_custom_css():
         [data-testid="stMetricDelta"] {{
             font-family: 'IBM Plex Mono', monospace !important;
         }}
-        /* Every stHorizontalBlock row of metrics stretches its columns to equal
-           height, so metric cards line up even when labels wrap differently. */
-        [data-testid="stHorizontalBlock"] {{
-            align-items: stretch;
-        }}
-        [data-testid="stHorizontalBlock"] [data-testid="stVerticalBlock"] {{
-            height: 100%;
-        }}
-        [data-testid="stHorizontalBlock"] [data-testid="stMetric"] {{
-            height: 100%;
-        }}
+        /* Every metric card in a row gets the same fixed height (set once, above)
+           regardless of whether it has a delta pill or a two-line label, rather
+           than relying on flex/percentage stretch through Streamlit's nested
+           wrapper divs, which doesn't reliably equalize sibling heights. */
 
         /* ---- Tabs ---- */
         [data-testid="stTabs"] [role="tablist"] {{

@@ -2,7 +2,7 @@
 
 A causal inference pipeline that takes a randomized ad-exposure dataset and files a validated answer to two questions: what was the average effect, and who did it actually work on, with every estimator checked against a known ground truth before it's trusted, and every segment-level claim checked for statistical validity before it's reported.
 
-Built as a portfolio project on entirely free-tier infrastructure: no paid APIs, no GPU, no local model weights beyond scikit-learn's own classifiers. Runs end-to-end on a 16GB, no-GPU laptop.
+Built as a portfolio project on entirely free-tier infrastructure: no paid APIs, no GPU, no local model weights, just scikit-learn's own classifiers. Runs end-to-end on a 16GB, no-GPU laptop.
 
 ## Preview
 
@@ -23,8 +23,6 @@ Given the Criteo Uplift dataset, the pipeline:
 3. **Finds who responds differently.** Estimates a CATE model on the clean randomized data, evaluates it honestly against random targeting rather than assuming it's correct just because it ran, and segments users to see where the effect actually differs.
 4. **Checks whether that finding is statistically defensible.** Corrects for testing many segments at once, and confirms each segment is even large enough to detect the effect being claimed.
 5. **Stress-tests the result.** Rosenbaum bounds quantify how much unmeasured confounding would be needed to overturn the matched-pairs conclusion.
-
-Every method here serves that narrative. Nothing was added just to check a skill-list box, see [Explicitly Out of Scope](#explicitly-out-of-scope) for what was deliberately left out, and why.
 
 ## Dataset
 
