@@ -6,8 +6,14 @@ scikit-uplift>=0.5.1    # sklift, fallback loader + Qini metrics
 
 # Modeling / causal inference
 scikit-learn>=1.4       # T-learner base classifiers, calibration, KMeans, propensity model
+                        # NOTE: scikit-uplift's qini_auc_score/qini_curve call the internal
+                        # sklearn.utils.extmath.stable_cumsum, which is deprecated and slated
+                        # for removal in a future sklearn release (currently raises a
+                        # FutureWarning, not yet broken). Watch scikit-uplift releases before
+                        # upgrading scikit-learn past whatever version removes it.
 statsmodels>=0.14       # OLS, power analysis (NormalIndPower, MDE), BH correction, proportions z-test
 scipy>=1.11             # bootstrap, hypothesis tests, Rosenbaum bounds (binom, pearsonr)
+sortedcontainers>=2.4   # O(log n) nearest-available lookup/removal for 1:1 PSM without replacement
 
 # Plotting (love plots, Qini curve, Rosenbaum bounds plot, dashboard charts)
 matplotlib>=3.8

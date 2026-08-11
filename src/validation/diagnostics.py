@@ -133,11 +133,38 @@ def run_full_diagnostics(
     treatment_col: str,
     propensity_col: str,
     caliper: float = 0.2,
+    random_state: int = None,
 ) -> dict:
-    matched = get_matched_pairs(df_before, treatment_col, propensity_col, caliper)
+    matched = get_matched_pairs(df_before, treatment_col, propensity_col, caliper, random_state=random_state)
 
     balance = balance_table(df_before, matched, covariate_cols, treatment_col)
     overlap = overlap_diagnostics(matched, propensity_col, treatment_col)
+
+    n_treated_total = int((df_before[treatment_col] == 1).sum())
+    n_pairs = int((matched[treatment_col] == 1).sum())
+    n_control_unique = matched.loc[matched[treatment_col] == 0].drop_duplicates(subset=covariate_cols).shape[0]
+    match_rate = n_pairs / n_treated_total if n_treated_total > 0 else 0.0
+
+    if n_control_unique != n_pairs:
+        # Matching is meant to be strictly 1:1 without replacement (see
+        # get_matched_pairs). If a control row's covariates repeat across pairs
+        # here, the matched sample is not what balance_table/overlap_diagnostics/
+        # Rosenbaum bounds assume it is, so surface it loudly rather than silently
+        # reporting a balance table for pairs that aren't really independent.
+        logger.warning(
+            "%d matched pairs but only %d distinct control rows were used — "
+            "matching is not behaving as strict 1:1 without replacement.",
+            n_pairs,
+            n_control_unique,
+        )
+
+    logger.info(
+        "Matching: %d of %d treated units matched (%.1f%%) against %d distinct controls",
+        n_pairs,
+        n_treated_total,
+        100 * match_rate,
+        n_control_unique,
+    )
 
     return {
         "balance_table": balance,
@@ -145,4 +172,8 @@ def run_full_diagnostics(
         "matched_df": matched,
         "n_imbalanced_covariates": int(balance["still_imbalanced"].sum()),
         "pct_within_overlap": overlap["pct_within_overlap"],
+        "n_pairs": n_pairs,
+        "n_treated_total": n_treated_total,
+        "match_rate": match_rate,
+        "n_control_unique": n_control_unique,
     }

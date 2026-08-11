@@ -7,9 +7,13 @@ from src.validation.estimators import (
     fit_propensity_score,
     apply_common_support_trim,
     get_matched_pairs,
+    psm_ate,
+    psm_pair_diffs,
     ipw_ate,
     aipw_ate,
+    aipw_scores,
     run_estimator_comparison,
+    run_estimator_comparison_with_ci,
 )
 
 
@@ -151,3 +155,73 @@ def test_run_estimator_comparison_returns_all_four_methods(rct_data):
     assert set(results.keys()) == {"naive_ols", "psm", "ipw", "aipw"}
     for estimate in results.values():
         assert np.isfinite(estimate)
+
+
+def test_get_matched_pairs_uses_each_control_at_most_once(rct_data):
+    # Regression test for a bug where NearestNeighbors matching reused the same
+    # control row across many treated units (matching with replacement), which
+    # breaks the independence assumption Rosenbaum bounds rely on. Matching must
+    # be strictly 1:1: every control row appears in at most one pair.
+    df, _ = rct_data
+    df = df.copy()
+    df["_propensity"] = fit_propensity_score(df, "treatment", ["f0", "f1"])
+
+    matched = get_matched_pairs(df, "treatment", "_propensity", caliper=0.2, random_state=0)
+
+    control_side = matched.loc[matched.treatment == 0].drop(columns=["_pair_id"])
+    n_pairs = matched["_pair_id"].nunique()
+    n_unique_controls = control_side.drop_duplicates().shape[0]
+
+    assert n_unique_controls == n_pairs
+
+
+def test_get_matched_pairs_caps_matches_at_size_of_minority_group(rct_data):
+    # With ~85% treated / ~15% control, strict 1:1 matching without replacement
+    # cannot produce more matched pairs than there are control units available,
+    # even before the caliper is applied.
+    df, _ = rct_data
+    df = df.copy()
+    df["_propensity"] = fit_propensity_score(df, "treatment", ["f0", "f1"])
+    n_control = (df["treatment"] == 0).sum()
+
+    matched = get_matched_pairs(df, "treatment", "_propensity", caliper=0.2, random_state=0)
+    n_pairs = matched["_pair_id"].nunique()
+
+    assert n_pairs <= n_control
+
+
+def test_psm_pair_diffs_mean_matches_psm_ate(rct_data):
+    df, _ = rct_data
+    df = df.copy()
+    df["_propensity"] = fit_propensity_score(df, "treatment", ["f0", "f1"])
+
+    matched = get_matched_pairs(df, "treatment", "_propensity", caliper=0.2, random_state=1)
+    diffs = psm_pair_diffs(matched, "visit", "treatment")
+    direct_estimate = psm_ate(df, "visit", "treatment", "_propensity", caliper=0.2, random_state=1)
+
+    assert diffs.mean() == pytest.approx(direct_estimate, abs=1e-9)
+
+
+def test_aipw_scores_mean_matches_aipw_ate(rct_data):
+    df, _ = rct_data
+    df = df.copy()
+    df["_propensity"] = fit_propensity_score(df, "treatment", ["f0", "f1"])
+
+    scores = aipw_scores(df, "visit", "treatment", ["f0", "f1"], "_propensity")
+    estimate = aipw_ate(df, "visit", "treatment", ["f0", "f1"], "_propensity")
+
+    assert scores.mean() == pytest.approx(estimate, abs=1e-9)
+
+
+def test_run_estimator_comparison_with_ci_produces_valid_intervals(rct_data):
+    df, true_ate = rct_data
+    results = run_estimator_comparison_with_ci(
+        df, "visit", "treatment", ["f0", "f1"], n_bootstrap=50, random_state=0
+    )
+
+    assert set(results.keys()) == {"naive_ols", "psm", "ipw", "aipw"}
+    for method, r in results.items():
+        assert r["ci_lower"] <= r["point_estimate"] <= r["ci_upper"], method
+        # A real CI shouldn't collapse to a single fabricated width formula for
+        # every method; at minimum it should have positive width.
+        assert r["ci_upper"] > r["ci_lower"], method

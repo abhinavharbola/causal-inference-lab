@@ -162,7 +162,9 @@ retention_probability = sigmoid(g0 + g1·X + g2·X·T)
 
 A **calibration loop** increases `g2` until a two-part validation gate passes: (a) `corr(X, T)` is significantly nonzero in the retained sample, and (b) the naive difference-in-means estimate falls outside the ground-truth CI. The loop is capped at `max_iters` and reports `converged: False` explicitly if the gate never trips, rather than looping forever or silently accepting an uncalibrated severity.
 
-The full estimator comparison, naive OLS, propensity score matching (with balance diagnostics), IPW, and AIPW, runs across four severities (none / mild / moderate / strong), producing the project's central diagnostic: a **bias-severity curve** showing naive estimation break down while matching/weighting stay comparatively robust.
+The full estimator comparison, naive OLS, propensity score matching (with balance diagnostics), IPW, and AIPW, runs across four severities (none / mild / moderate / strong), producing the project's central diagnostic: a **bias-severity curve** showing naive estimation break down while matching/weighting stay comparatively robust. Each point on that curve carries a real bootstrap confidence interval (`run_estimator_comparison_with_ci`), not a fixed-width heuristic, computed without refitting AIPW's nuisance models on every resample (see the function's docstring for how).
+
+Matching (`get_matched_pairs`) is strict 1:1 without replacement: every control row is used in at most one pair. Under this dataset's ~85/15 treated/control split, that caps the number of matched pairs at the size of the control group, so most treated units go unmatched — expected behavior for a genuine matched-pairs design, not a bug, and reported explicitly as a match rate alongside the balance table.
 
 ### Section 2: Heterogeneity
 
@@ -176,6 +178,8 @@ Users are segmented via unsupervised clustering on pre-treatment covariates (Cri
 
 Testing many segments at once inflates the false-positive rate, so **Benjamini-Hochberg correction** is applied before any segment is called significant. A **per-segment power analysis** separately checks whether each segment is even large enough to detect the effect size being claimed, a common real-world mistake this project deliberately surfaces rather than glosses over.
 
+The power analysis anchors its assumed effect size on Section 1's ground-truth ATE (loaded from `data/processed/ground_truth.json`) rather than on the segment effects computed earlier in the same notebook, using the same effects to set the target and then to test against it is circular and overstates how informative the power numbers are. If `01_validation.ipynb` hasn't been run yet, the notebook falls back to the segment-effect median and says so explicitly, flagging that fallback as illustrative only.
+
 ### Section 4: Sensitivity analysis
 
 **Rosenbaum bounds** run specifically on the PSM matched-pairs output from Section 1, at the calibrated confounding severity, not on IPW/AIPW estimates, since Rosenbaum bounds are defined in terms of matched pairs and there's no equivalent structure for a weighting-based estimator. The output is the critical Gamma: how strong an unmeasured confounder would need to be, in odds-ratio terms, to overturn the matched-pairs conclusion.
@@ -186,12 +190,26 @@ A single diagnostic critique reads the balance table, overlap diagnostics, and R
 
 ---
 
+## Explicitly Out of Scope
+
+Left out deliberately, not for lack of time:
+
+- **Causal forests / X-learner / DR-learner.** A T-learner is simpler to explain and debug, and is defensible here specifically because `visit`'s base rate and the calibrated base classifiers keep its per-arm outcome models well-behaved. A causal forest would likely give tighter CATE estimates at the cost of being harder to reason about and slower to iterate on for a portfolio project, worth revisiting if this were a production system rather than a demonstration of the validation methodology.
+- **Instrumental variables / regression discontinuity.** The dataset is already a genuine randomized experiment, so there's no compliance or assignment-mechanism problem to instrument around. Including an IV section would be checking a skill-list box, not serving the narrative.
+- **Multiple treatment arms / dose-response on the real treatment.** Criteo's `treatment` column is binary. The dose-response curve in Section 1 varies simulated confounding severity, not the real treatment itself — there is no real multi-arm structure in this data to model.
+- **Long-term / delayed outcome windows.** `visit` and `conversion` are both measured within the dataset's fixed attribution window; there's no timestamp granularity in this release to study effect decay or delayed conversion.
+- **Off-policy evaluation of a new targeting policy.** The CATE model here is evaluated for ranking quality (Qini) against the existing random assignment, not used to simulate or score a hypothetical new targeting policy, that's a natural next step but a different (and larger) validation problem.
+- **GPU / deep-learning uplift models.** Runs on a 16GB no-GPU laptop by design; a two-model T-learner with calibrated linear/logistic base learners is enough to demonstrate the validation methodology without needing a GPU-backed uplift network.
+- **Variable-ratio or with-replacement PSM.** Matching here is strict 1:1 without replacement (see Section 1), which under this dataset's ~85/15 split discards most treated units. Variable-ratio matching (k controls per treated unit) or full/optimal matching would use the data more efficiently and is a reasonable extension, left out to keep the matched-pairs structure that Section 4's Rosenbaum bounds are defined in terms of as simple as possible to reason about.
+
+---
+
 ## Tech stack
 
 | Layer | Choice |
 |---|---|
 | Compute | Local CPU only, subsampled for CATE/estimator work |
-| Core libraries | `pandas`, `numpy`, `scikit-learn`, `statsmodels`, `scipy`, `scikit-uplift` |
+| Core libraries | `pandas`, `numpy`, `scikit-learn`, `statsmodels`, `scipy`, `scikit-uplift`, `sortedcontainers` (1:1 matching without replacement) |
 | Database | Supabase (primary), local SQLite (automatic fallback) |
 | Logging | Logfire (structured), console (automatic fallback) |
 | Dashboard | Streamlit |
@@ -243,10 +261,12 @@ streamlit run dashboard/app.py
 
 The dashboard is a visualization layer, not a recomputation engine, it reads the logged runs and saved artifacts above. If a section's artifact doesn't exist yet, it shows which notebook to run, rather than crashing.
 
+Styling is entirely CSS injected in `dashboard/app.py` (no separate stylesheet or build step): Source Serif 4 for headings, Public Sans for body/UI text, IBM Plex Mono for anything numeric (estimates, p-values, gamma), loaded via a Google Fonts `@import` so nothing needs to be installed locally. Every chart, badge, and table uses the same token palette, a cool-neutral paper background, deep ink-blue for structure, a restrained gold accent for the handful of signal moments (active tab, key emphasis), and one consistent set of method colors across every method comparison in the app, rather than mixing per-chart defaults.
+
 ## Running the tests
 
 ```bash
 pytest tests/ -v
 ```
 
-25 tests across `test_confounding.py`, `test_estimators.py`, and `test_power_analysis.py`, covering calibration convergence/non-convergence, estimator correctness on known synthetic data, and MDE/power calculation correctness.
+32 tests across `test_confounding.py`, `test_estimators.py`, `test_diagnostics.py`, and `test_power_analysis.py`, covering calibration convergence/non-convergence, estimator correctness on known synthetic data, matched-pairs uniqueness (no control row reused across pairs), and MDE/power calculation correctness.

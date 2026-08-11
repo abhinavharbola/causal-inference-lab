@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 import sys
@@ -16,39 +17,337 @@ from src.utils.power_analysis import mde_comparison_table
 
 configure_logging()
 
-DATA_DIR = "data/processed"
+# Absolute, not relative to cwd: relative paths broke if the dashboard was ever
+# launched from a directory other than the project root.
+DATA_DIR = os.path.join(PROJECT_ROOT, "data", "processed")
 
 st.set_page_config(
     page_title="Causal Impact & Heterogeneous Response Analysis",
-    page_icon="📊",
+    page_icon=":material/insights:",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # ---------------------------------------------------------------------------
-# Shared styling: one consistent look for every matplotlib figure in the app,
-# set once here rather than repeated per chart.
+# Design tokens
+#
+# A "research instrument" identity, not a generic SaaS dashboard: a cool
+# neutral paper background, a deep ink-blue for structure, a restrained gold
+# for the handful of signal moments (active tab, key emphasis), and a
+# muted, jewel-toned quartet of method colors used consistently across every
+# chart, table, and badge in the app instead of matplotlib's default tab10.
+#
+# Type: Source Serif 4 for headings (an editorial, rigorous voice), Public
+# Sans for body/UI text, IBM Plex Mono for anything that reads as a
+# measurement, an estimate, a p-value, a gamma.
+# ---------------------------------------------------------------------------
+INK = "#1B1E24"
+INK_SOFT = "#5B6270"
+PAPER = "#EEF0F3"
+SURFACE = "#FFFFFF"
+SURFACE_ALT = "#F6F7F9"
+BORDER = "#DBDFE6"
+PRIMARY = "#223A5E"
+PRIMARY_SOFT = "#3D5A80"
+ACCENT = "#B8862B"
+
+PALETTE = {
+    "naive_ols": "#9B2226",
+    "psm": "#3D6E8C",
+    "ipw": "#3F7D5C",
+    "aipw": "#5B4B8A",
+}
+
+METHOD_LABELS = {
+    "naive_ols": "Naive OLS",
+    "psm": "PSM",
+    "ipw": "IPW",
+    "aipw": "AIPW",
+}
+
+
+def inject_custom_css():
+    st.markdown(
+        f"""
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+        :root {{
+            --ink: {INK};
+            --ink-soft: {INK_SOFT};
+            --paper: {PAPER};
+            --surface: {SURFACE};
+            --surface-alt: {SURFACE_ALT};
+            --border: {BORDER};
+            --primary: {PRIMARY};
+            --primary-soft: {PRIMARY_SOFT};
+            --accent: {ACCENT};
+            --radius: 10px;
+        }}
+
+        html, body, [class*="css"] {{
+            font-family: 'Public Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+        }}
+
+        .stApp {{ background: var(--paper); }}
+
+        [data-testid="stAppViewContainer"] .block-container {{
+            padding-top: 2.25rem;
+            padding-bottom: 3rem;
+            max-width: 1180px;
+        }}
+
+        /* ---- Typography ---- */
+        h1, h2, h3, h4 {{
+            font-family: 'Source Serif 4', Georgia, serif !important;
+            color: var(--ink) !important;
+            font-weight: 600 !important;
+            letter-spacing: -0.01em;
+        }}
+        h2[data-testid="stHeadingWithActionElements"], h2 {{
+            padding-bottom: 0.55rem;
+            border-bottom: 1px solid var(--border);
+            margin-top: 2.75rem !important;
+        }}
+        h3 {{ margin-top: 1.6rem !important; }}
+        p, li, span, label {{ color: var(--ink); }}
+
+        [data-testid="stCaptionContainer"] {{
+            font-family: 'IBM Plex Mono', 'Courier New', monospace !important;
+            color: var(--ink-soft) !important;
+            font-size: 0.8rem !important;
+            letter-spacing: 0.01em;
+        }}
+
+        code, [data-testid="stCode"] {{
+            font-family: 'IBM Plex Mono', monospace !important;
+        }}
+
+        /* ---- Eyebrow labels (section kicker, mono + gold) ---- */
+        .eyebrow {{
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.72rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--accent);
+            font-weight: 600;
+            margin: 0 0 0.2rem 0;
+        }}
+        .eyebrow.sub {{ color: var(--primary-soft); }}
+
+        /* ---- Masthead ---- */
+        .masthead-eyebrow {{
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.78rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--primary-soft);
+            margin-bottom: 0.5rem;
+        }}
+        .masthead-title {{
+            font-family: 'Source Serif 4', serif;
+            font-size: 2.15rem;
+            font-weight: 600;
+            color: var(--ink);
+            margin: 0;
+            line-height: 1.18;
+        }}
+        .masthead-sub {{
+            font-family: 'Public Sans', sans-serif;
+            color: var(--ink-soft);
+            font-size: 1rem;
+            margin-top: 0.4rem;
+        }}
+        .masthead-rule {{
+            height: 3px;
+            width: 60px;
+            background: var(--accent);
+            margin: 1rem 0 0.4rem 0;
+            border-radius: 2px;
+        }}
+
+        /* ---- Sidebar ---- */
+        [data-testid="stSidebar"] {{
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+        }}
+        [data-testid="stSidebar"] h3 {{
+            font-family: 'IBM Plex Mono', monospace !important;
+            font-size: 0.85rem !important;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 600 !important;
+            border-bottom: none;
+            margin-top: 0.25rem !important;
+        }}
+
+        .status-row {{
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.22rem 0;
+            font-family: 'Public Sans', sans-serif;
+            font-size: 0.86rem;
+            color: var(--ink);
+        }}
+        .status-dot {{
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }}
+        .status-dot.done {{ background: #3F7D5C; }}
+        .status-dot.pending {{ background: var(--surface); border: 1.5px solid #C3C9D2; }}
+        .status-row.pending {{ color: var(--ink-soft); }}
+
+        /* ---- Metrics ---- */
+        [data-testid="stMetric"] {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.95rem 1.1rem 0.75rem 1.1rem;
+        }}
+        [data-testid="stMetricLabel"] p {{
+            font-family: 'IBM Plex Mono', monospace !important;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-size: 0.7rem !important;
+            color: var(--ink-soft) !important;
+        }}
+        [data-testid="stMetricValue"] {{
+            font-family: 'IBM Plex Mono', monospace !important;
+            color: var(--primary) !important;
+            font-weight: 600 !important;
+        }}
+
+        /* ---- Tabs ---- */
+        [data-testid="stTabs"] [data-baseweb="tab-list"] {{
+            gap: 4px;
+            border-bottom: 1px solid var(--border);
+        }}
+        [data-testid="stTab"] {{
+            font-family: 'IBM Plex Mono', monospace !important;
+            font-size: 0.82rem !important;
+            letter-spacing: 0.02em;
+            color: var(--ink-soft) !important;
+        }}
+        [data-testid="stTab"] p {{
+            font-family: 'IBM Plex Mono', monospace !important;
+            font-size: 0.82rem !important;
+        }}
+        [data-testid="stTab"][aria-selected="true"] {{
+            color: var(--primary) !important;
+        }}
+        [data-testid="stTab"][aria-selected="true"] p {{
+            color: var(--primary) !important;
+            font-weight: 600 !important;
+        }}
+        [data-baseweb="tab-highlight"] {{
+            background-color: var(--accent) !important;
+            height: 2.5px !important;
+        }}
+        [data-baseweb="tab-border"] {{ background-color: var(--border) !important; }}
+
+        /* ---- DataFrame / tables ---- */
+        [data-testid="stDataFrame"] {{
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }}
+
+        /* ---- Buttons ---- */
+        [data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-secondaryFormSubmit"] {{
+            border-radius: 8px !important;
+            border: 1px solid var(--primary) !important;
+            color: var(--primary) !important;
+            font-family: 'Public Sans', sans-serif !important;
+            font-weight: 600 !important;
+        }}
+        [data-testid="stBaseButton-secondary"]:hover {{
+            background: var(--primary) !important;
+            color: white !important;
+        }}
+        [data-testid="stDownloadButton"] button {{
+            border-radius: 8px !important;
+            border: 1px solid var(--border) !important;
+            color: var(--primary-soft) !important;
+            font-family: 'Public Sans', sans-serif !important;
+            font-weight: 500 !important;
+            font-size: 0.85rem !important;
+        }}
+        [data-testid="stDownloadButton"] button:hover {{
+            border-color: var(--primary) !important;
+            color: var(--primary) !important;
+        }}
+
+        /* ---- Alerts ---- */
+        [data-testid="stAlert"] {{
+            border-radius: var(--radius);
+            font-family: 'Public Sans', sans-serif;
+        }}
+
+        /* ---- Expander ---- */
+        [data-testid="stExpander"] {{
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--surface);
+        }}
+
+        /* ---- Progress bar ---- */
+        [data-testid="stProgress"] > div > div {{ background: var(--accent) !important; }}
+
+        hr {{ border-color: var(--border) !important; }}
+
+        /* ---- Card wrapper (used for pipeline overview) ---- */
+        .ci-card {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.1rem 1.25rem;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def eyebrow(text: str, sub: bool = False):
+    cls = "eyebrow sub" if sub else "eyebrow"
+    st.markdown(f'<div class="{cls}">{text}</div>', unsafe_allow_html=True)
+
+
+inject_custom_css()
+
+# ---------------------------------------------------------------------------
+# Shared matplotlib styling: one consistent look for every chart in the app,
+# tuned to match the CSS token palette above rather than matplotlib defaults.
 # ---------------------------------------------------------------------------
 plt.rcParams.update(
     {
         "axes.spines.top": False,
         "axes.spines.right": False,
+        "axes.spines.left": True,
+        "axes.spines.bottom": True,
+        "axes.edgecolor": BORDER,
         "axes.grid": True,
-        "grid.alpha": 0.25,
+        "grid.color": BORDER,
+        "grid.alpha": 0.7,
+        "grid.linewidth": 0.6,
         "axes.axisbelow": True,
         "font.size": 10,
+        "text.color": INK,
+        "axes.labelcolor": INK_SOFT,
+        "xtick.color": INK_SOFT,
+        "ytick.color": INK_SOFT,
         "axes.titlesize": 12,
         "axes.titleweight": "bold",
+        "axes.titlecolor": INK,
         "figure.facecolor": "none",
         "axes.facecolor": "none",
         "savefig.facecolor": "none",
+        "legend.frameon": False,
     }
 )
-PALETTE = {
-    "naive_ols": "#d62728",
-    "psm": "#1f77b4",
-    "ipw": "#2ca02c",
-    "aipw": "#9467bd",
-}
 
 
 def _new_fig(figsize):
@@ -73,7 +372,7 @@ def load_json(filename: str, mtime=None):
         with open(path) as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
-        st.warning(f"⚠️ Could not read `{filename}` (may be mid-write from a running notebook): {exc}")
+        st.warning(f"Could not read `{filename}` (may be mid-write from a running notebook): {exc}", icon=":material/warning:")
         return None
 
 
@@ -85,7 +384,7 @@ def load_csv(filename: str, mtime=None):
     try:
         return pd.read_csv(path)
     except (pd.errors.ParserError, OSError) as exc:
-        st.warning(f"⚠️ Could not read `{filename}` (may be mid-write from a running notebook): {exc}")
+        st.warning(f"Could not read `{filename}` (may be mid-write from a running notebook): {exc}", icon=":material/warning:")
         return None
 
 
@@ -108,7 +407,7 @@ def cached_fetch_estimation_runs():
 
 
 def missing_data_notice(what: str, notebook: str):
-    st.info(f"📭 {what} not found yet. Run `{notebook}` to generate it.")
+    st.info(f"{what} not found yet. Run `{notebook}` to generate it.", icon=":material/inbox:")
 
 
 def freshness_caption(filename: str):
@@ -117,7 +416,6 @@ def freshness_caption(filename: str):
     path = os.path.join(DATA_DIR, filename)
     mtime = _file_mtime(path)
     if mtime is not None:
-        import datetime
         age = datetime.datetime.now().timestamp() - mtime
         stamp = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
         if age < 60:
@@ -126,15 +424,25 @@ def freshness_caption(filename: str):
             age_str = f"{int(age / 60)}m ago"
         else:
             age_str = f"{age / 3600:.1f}h ago"
-        st.caption(f"🕒 Generated {stamp} ({age_str})")
+        st.caption(f"GENERATED {stamp} · {age_str}")
 
 
 def download_button(df: pd.DataFrame, label: str, filename: str):
     st.download_button(
-        label=f"⬇️ Download {label} (CSV)",
+        label=f"Download {label} (CSV)",
         data=df.to_csv(index=False).encode("utf-8"),
         file_name=filename,
         mime="text/csv",
+        icon=":material/download:",
+    )
+
+
+def status_pill(present: bool, label: str):
+    dot_cls = "done" if present else "pending"
+    row_cls = "status-row" if present else "status-row pending"
+    st.markdown(
+        f'<div class="{row_cls}"><span class="status-dot {dot_cls}"></span>{label}</div>',
+        unsafe_allow_html=True,
     )
 
 
@@ -143,8 +451,10 @@ def download_button(df: pd.DataFrame, label: str, filename: str):
 # which notebooks still need to be run rather than digging through tabs.
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### 📊 Project Status")
-    st.caption("Criteo Uplift v2.1 · validation → heterogeneity → sensitivity")
+    eyebrow("Criteo Uplift v2.1")
+    st.markdown("### Pipeline Status")
+    st.caption("validation &rarr; heterogeneity &rarr; sensitivity", unsafe_allow_html=True)
+    st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
 
     _artifact_checklist = [
         ("Ground-truth ATE", "ground_truth.json", "01_validation.ipynb"),
@@ -167,15 +477,15 @@ with st.sidebar:
         else:
             present = os.path.exists(os.path.join(DATA_DIR, fname))
         _done_count += int(present)
-        icon = "✅" if present else "⬜"
-        st.markdown(f"{icon} {label}")
+        status_pill(present, label)
 
+    st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
     st.progress(_done_count / len(_artifact_checklist))
-    st.caption(f"{_done_count} of {len(_artifact_checklist)} pipeline artifacts ready")
+    st.caption(f"{_done_count} OF {len(_artifact_checklist)} ARTIFACTS READY")
 
     st.divider()
 
-    if st.button("🔄 Refresh data", width='stretch'):
+    if st.button("Refresh data", icon=":material/refresh:", width="stretch"):
         st.cache_data.clear()
         st.rerun()
     st.caption(
@@ -184,23 +494,31 @@ with st.sidebar:
         "immediately after clicking the button above."
     )
 
-    with st.expander("ℹ️ About this dashboard"):
+    with st.expander("About this dashboard"):
         st.markdown(
             "This is a **visualization layer**, not a recomputation engine, it reads "
             "artifacts the notebooks produce, rather than re-running the pipeline. "
             "If a section looks empty, run the notebook listed next to it above."
         )
 
-st.title("📊 Causal Impact & Heterogeneous Response Analysis")
-st.caption("Criteo Uplift Modeling Dataset (v2.1), validation, heterogeneity, and sensitivity analysis")
+# ---------------------------------------------------------------------------
+# Masthead
+# ---------------------------------------------------------------------------
+st.markdown('<div class="masthead-eyebrow">Causal Inference &middot; Validation Report</div>', unsafe_allow_html=True)
+st.markdown('<p class="masthead-title">Causal Impact &amp; Heterogeneous Response Analysis</p>', unsafe_allow_html=True)
+st.markdown('<div class="masthead-rule"></div>', unsafe_allow_html=True)
+st.markdown(
+    '<p class="masthead-sub">Criteo Uplift Modeling Dataset (v2.1) &middot; validation, heterogeneity, and sensitivity analysis</p>',
+    unsafe_allow_html=True,
+)
 
 tab1, tab1_5, tab2, tab3, tab4 = st.tabs(
     [
-        "📈 1. Validation",
-        "🎯 1.5 Outcome Justification",
-        "🧬 2. Heterogeneity",
-        "📐 3. Statistical Rigor",
-        "🛡️ 4. Sensitivity",
+        "01 &middot; Validation",
+        "01.5 &middot; Outcome",
+        "02 &middot; Heterogeneity",
+        "03 &middot; Rigor",
+        "04 &middot; Sensitivity",
     ]
 )
 
@@ -208,6 +526,7 @@ tab1, tab1_5, tab2, tab3, tab4 = st.tabs(
 # Section 1: Validation via self-induced confounding
 # ---------------------------------------------------------------------------
 with tab1:
+    eyebrow("Stage 01")
     st.header("Bias-Severity Curve")
     st.write(
         "Naive OLS, PSM, IPW, and AIPW estimates across confounding severities, "
@@ -243,22 +562,22 @@ with tab1:
                     group["ci_upper"] - group["point_estimate"],
                 ],
                 marker="o",
-                label=method,
+                label=METHOD_LABELS.get(method, method),
                 capsize=3,
-                color=PALETTE.get(method),
+                color=PALETTE.get(method, PRIMARY),
                 linewidth=2,
             )
 
         if ground_truth is not None:
-            ax.axhline(ground_truth["ate"], color="black", linestyle="--", linewidth=1.5, label="Ground truth ATE")
-            ax.axhspan(ground_truth["ci_lower"], ground_truth["ci_upper"], color="gray", alpha=0.15)
+            ax.axhline(ground_truth["ate"], color=INK, linestyle="--", linewidth=1.5, label="Ground truth ATE")
+            ax.axhspan(ground_truth["ci_lower"], ground_truth["ci_upper"], color=PRIMARY, alpha=0.08)
 
         ax.set_xticks(range(len(present_severities)))
-        ax.set_xticklabels(present_severities)
+        ax.set_xticklabels([s.capitalize() for s in present_severities])
         ax.set_xlabel("Confounding severity")
         ax.set_ylabel("Estimated ATE")
         ax.set_title("Estimator bias across confounding severity")
-        ax.legend(frameon=False)
+        ax.legend()
         fig.tight_layout()
 
         st.pyplot(fig)
@@ -272,18 +591,20 @@ with tab1:
                 best = at_strongest.loc[at_strongest["abs_bias"].idxmin()]
                 worst = at_strongest.loc[at_strongest["abs_bias"].idxmax()]
                 st.success(
-                    f"At **{strongest}** confounding severity: **{best['method']}** stayed closest to the "
-                    f"ground truth (bias {best['abs_bias']:.4f}), while **{worst['method']}** drifted "
-                    f"furthest (bias {worst['abs_bias']:.4f})."
+                    f"At **{strongest}** confounding severity: **{METHOD_LABELS.get(best['method'], best['method'])}** "
+                    f"stayed closest to the ground truth (bias {best['abs_bias']:.4f}), while "
+                    f"**{METHOD_LABELS.get(worst['method'], worst['method'])}** drifted furthest "
+                    f"(bias {worst['abs_bias']:.4f}).",
+                    icon=":material/check_circle:",
                 )
 
-        with st.expander("📋 Show raw estimation run log"):
+        with st.expander("Show raw estimation run log"):
             display_df = runs_df[["method", "severity_label", "g2", "point_estimate", "ci_lower", "ci_upper"]]
             st.dataframe(
                 display_df.style.format(
                     {"g2": "{:.2f}", "point_estimate": "{:.4f}", "ci_lower": "{:.4f}", "ci_upper": "{:.4f}"}
                 ),
-                width='stretch',
+                width="stretch",
             )
             download_button(display_df, "estimation runs", "estimation_runs.csv")
             freshness_caption("ground_truth.json")
@@ -295,12 +616,30 @@ with tab1:
     else:
         n_imbalanced = int(balance_df["still_imbalanced"].sum()) if "still_imbalanced" in balance_df.columns else 0
         if n_imbalanced == 0:
-            st.success("✅ All covariates balanced after matching (|SMD| ≤ 0.1).")
+            st.success("All covariates balanced after matching (|SMD| \u2264 0.1).", icon=":material/check_circle:")
         else:
-            st.warning(f"⚠️ {n_imbalanced} of {len(balance_df)} covariates remain imbalanced after matching.")
+            st.warning(
+                f"{n_imbalanced} of {len(balance_df)} covariates remain imbalanced after matching.",
+                icon=":material/warning:",
+            )
+
+        match_diag = load_json_fresh("match_diagnostics.json")
+        if match_diag is not None:
+            # Matching is strict 1:1 without replacement, so with ~85% of the sample
+            # treated, most treated units are expected to go unmatched — this reports
+            # exactly how much of the treated group the matched sample above is based on.
+            mc1, mc2, mc3 = st.columns(3)
+            mc1.metric(
+                "Treated units matched",
+                f"{match_diag['n_pairs']:,} / {match_diag['n_treated_total']:,}",
+                f"{100 * match_diag['match_rate']:.1f}%",
+            )
+            mc2.metric("Distinct controls used", f"{match_diag['n_control_unique']:,}")
+            controls_match = match_diag["n_control_unique"] == match_diag["n_pairs"]
+            mc3.metric("Each control used once", "Yes" if controls_match else "No")
 
         format_cols = {c: "{:.4f}" for c in ["smd_before", "smd_after"] if c in balance_df.columns}
-        st.dataframe(balance_df.style.format(format_cols), width='stretch')
+        st.dataframe(balance_df.style.format(format_cols), width="stretch")
         download_button(balance_df, "balance table", "balance_table.csv")
         freshness_caption("balance_table.csv")
 
@@ -308,6 +647,7 @@ with tab1:
 # Section 1.5: Outcome variable justification
 # ---------------------------------------------------------------------------
 with tab1_5:
+    eyebrow("Stage 01.5")
     st.header("Outcome Variable Justification (MDE)")
     st.write(
         "Minimum detectable effect for `visit` vs `conversion` at the planned Section 2 "
@@ -336,7 +676,7 @@ with tab1_5:
         table.style.format(
             {"baseline_rate": "{:.4f}", "mde_absolute": "{:.5f}", "mde_relative_pct": "{:.2f}%"}
         ),
-        width='stretch',
+        width="stretch",
     )
     st.caption(
         "`conversion` typically requires a much larger relative effect to be detectable at the same "
@@ -348,6 +688,7 @@ with tab1_5:
 # Section 2: Heterogeneity / segmentation
 # ---------------------------------------------------------------------------
 with tab2:
+    eyebrow("Stage 02")
     st.header("Segment-Level CATE Breakdown")
     segment_df = load_csv_fresh("segment_effects.csv")
     if segment_df is None:
@@ -360,8 +701,8 @@ with tab2:
         }
         styled = segment_df.style.format(format_cols)
         if "point_estimate" in segment_df.columns:
-            styled = styled.highlight_max(subset=["point_estimate"], color="#d4f4dd")
-        st.dataframe(styled, width='stretch')
+            styled = styled.highlight_max(subset=["point_estimate"], color="#DCE9E1")
+        st.dataframe(styled, width="stretch")
         download_button(segment_df, "segment effects", "segment_effects.csv")
         freshness_caption("segment_effects.csv")
 
@@ -376,10 +717,10 @@ with tab2:
             ],
             fmt="o",
             capsize=3,
-            color="#1f77b4",
+            color=PRIMARY_SOFT,
             markersize=7,
         )
-        ax.axvline(0, color="gray", linestyle="--", linewidth=1)
+        ax.axvline(0, color=INK_SOFT, linestyle="--", linewidth=1)
         ax.set_yticks(y_pos)
         ax.set_yticklabels(segment_df["segment"])
         ax.set_xlabel("Estimated treatment effect")
@@ -396,28 +737,36 @@ with tab2:
         m1, m2 = st.columns([1, 2])
         m1.metric("Qini coefficient", f"{qini_coef:.4f}")
         if qini_coef > 0.02:
-            m2.success("Model ranks units by uplift meaningfully better than random targeting.")
+            m2.success("Model ranks units by uplift meaningfully better than random targeting.", icon=":material/check_circle:")
         elif qini_coef > 0:
-            m2.info("Model beats random targeting, but the margin is modest, interpret segments with care.")
+            m2.info("Model beats random targeting, but the margin is modest, interpret segments with care.", icon=":material/info:")
         else:
-            m2.warning("Model is not clearly better than random targeting, segment findings below may not reflect real heterogeneity.")
+            m2.warning(
+                "Model is not clearly better than random targeting, segment findings below may not reflect real heterogeneity.",
+                icon=":material/warning:",
+            )
 
         fig, ax = _new_fig((6, 5))
         curve_x = qini_result["curve_x"]
         curve_y = qini_result["curve_y"]
-        ax.plot(curve_x, curve_y, label="Model", color="#1f77b4", linewidth=2)
+        ax.plot(curve_x, curve_y, label="Model", color=PRIMARY_SOFT, linewidth=2)
         ax.plot(
             [curve_x[0], curve_x[-1]], [curve_y[0], curve_y[-1]],
-            linestyle="--", color="gray", label="Random targeting",
+            linestyle="--", color=INK_SOFT, label="Random targeting",
         )
-        ax.fill_between(curve_x, curve_y, np.linspace(curve_y[0], curve_y[-1], len(curve_x)), alpha=0.08, color="#1f77b4")
+        ax.fill_between(curve_x, curve_y, np.linspace(curve_y[0], curve_y[-1], len(curve_x)), alpha=0.08, color=PRIMARY_SOFT)
         ax.set_xlabel("Number targeted")
         ax.set_ylabel("Cumulative incremental outcomes")
         ax.set_title("Qini Curve")
         fig.tight_layout()
         st.pyplot(fig)
         freshness_caption("qini_curve.json")
+
+# ---------------------------------------------------------------------------
+# Section 3: Statistical rigor
+# ---------------------------------------------------------------------------
 with tab3:
+    eyebrow("Stage 03")
     st.header("Multiple Comparison Correction")
     segment_df = load_csv_fresh("segment_effects.csv")
     if segment_df is None or "p_value_adjusted" not in segment_df.columns:
@@ -433,11 +782,12 @@ with tab3:
         display_cols = ["segment", "p_value", "p_value_adjusted", "significant_after_correction"]
         st.dataframe(
             segment_df[display_cols].style.format({"p_value": "{:.4f}", "p_value_adjusted": "{:.4f}"}),
-            width='stretch',
+            width="stretch",
         )
         download_button(segment_df[display_cols], "BH-corrected segments", "segment_significance.csv")
         freshness_caption("segment_effects.csv")
 
+    eyebrow("Stage 03", sub=True)
     st.header("Per-Segment Power Analysis")
     power_df = load_csv_fresh("segment_power.csv")
     if power_df is None:
@@ -445,22 +795,24 @@ with tab3:
     else:
         n_underpowered = int(power_df["underpowered"].sum())
         format_cols = {c: "{:.4f}" for c in ["achieved_power"] if c in power_df.columns}
-        st.dataframe(power_df.style.format(format_cols), width='stretch')
+        st.dataframe(power_df.style.format(format_cols), width="stretch")
         download_button(power_df, "segment power", "segment_power.csv")
         freshness_caption("segment_power.csv")
 
         if n_underpowered > 0:
             st.warning(
-                f"⚠️ {n_underpowered} of {len(power_df)} segments are underpowered at the assumed effect size. "
-                "Per-segment findings for these should be treated as directional, not confirmatory."
+                f"{n_underpowered} of {len(power_df)} segments are underpowered at the assumed effect size. "
+                "Per-segment findings for these should be treated as directional, not confirmatory.",
+                icon=":material/warning:",
             )
         else:
-            st.success("✅ All segments are adequately powered at the assumed effect size.")
+            st.success("All segments are adequately powered at the assumed effect size.", icon=":material/check_circle:")
 
 # ---------------------------------------------------------------------------
 # Section 4: Sensitivity analysis
 # ---------------------------------------------------------------------------
 with tab4:
+    eyebrow("Stage 04")
     st.header("Rosenbaum Sensitivity Bounds")
     bounds_df = load_csv_fresh("rosenbaum_bounds.csv")
     if bounds_df is None:
@@ -474,31 +826,32 @@ with tab4:
         if approx_critical_gamma is not None:
             m1.metric("Approx. critical Gamma", f"{approx_critical_gamma:.2f}")
             if approx_critical_gamma < 1.5:
-                m2.warning("Fragile: only mild unmeasured confounding would overturn this conclusion.")
+                m2.warning("Fragile: only mild unmeasured confounding would overturn this conclusion.", icon=":material/warning:")
             elif approx_critical_gamma < 3:
-                m2.info("Moderately robust to unmeasured confounding.")
+                m2.info("Moderately robust to unmeasured confounding.", icon=":material/info:")
             else:
-                m2.success("Robust: substantial unmeasured confounding would be needed to overturn this.")
+                m2.success("Robust: substantial unmeasured confounding would be needed to overturn this.", icon=":material/check_circle:")
         else:
             m1.metric("Approx. critical Gamma", f"> {bounds_df['gamma'].max():.2f}")
-            m2.success("Robust to every confounding strength checked in this table.")
+            m2.success("Robust to every confounding strength checked in this table.", icon=":material/check_circle:")
         st.caption("Approximate value read off the saved bounds table's grid resolution, not re-solved exactly.")
 
         fig, ax = _new_fig((6, 4))
-        ax.plot(bounds_df["gamma"], bounds_df["worst_case_p_value"], marker="o", markersize=3, color="#1f77b4", linewidth=2)
-        ax.axhline(alpha, linestyle="--", color="#d62728", linewidth=1.5, label=f"alpha = {alpha}")
+        ax.plot(bounds_df["gamma"], bounds_df["worst_case_p_value"], marker="o", markersize=3, color=PRIMARY_SOFT, linewidth=2)
+        ax.axhline(alpha, linestyle="--", color="#9B2226", linewidth=1.5, label=f"alpha = {alpha}")
         ax.set_xlabel("Gamma (unmeasured confounding strength)")
         ax.set_ylabel("Worst-case p-value")
         ax.set_title("Rosenbaum Sensitivity Bounds")
-        ax.legend(frameon=False)
+        ax.legend()
         fig.tight_layout()
         st.pyplot(fig)
 
-        with st.expander("📋 Show raw bounds table"):
-            st.dataframe(bounds_df.style.format({"worst_case_p_value": "{:.4f}"}), width='stretch')
+        with st.expander("Show raw bounds table"):
+            st.dataframe(bounds_df.style.format({"worst_case_p_value": "{:.4f}"}), width="stretch")
             download_button(bounds_df, "Rosenbaum bounds", "rosenbaum_bounds.csv")
             freshness_caption("rosenbaum_bounds.csv")
 
+    eyebrow("Stage 04", sub=True)
     st.header("Diagnostic Critique (LLM)")
     critique = load_json_fresh("critique.json")
     if critique is None:
@@ -506,10 +859,11 @@ with tab4:
     else:
         if critique["source"] == "rule_based_fallback":
             st.warning(
-                "⚙️ Rule-based fallback, not an actual LLM response "
-                "(no Groq/NIM API key was configured when this was generated)."
+                "Rule-based fallback, not an actual LLM response "
+                "(no Groq/NIM API key was configured when this was generated).",
+                icon=":material/settings:",
             )
         else:
-            st.success(f"🤖 Live LLM response via **{critique['source']}**")
+            st.success(f"Live LLM response via **{critique['source']}**", icon=":material/smart_toy:")
         st.markdown(critique["critique_text"])
         freshness_caption("critique.json")
