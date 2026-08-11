@@ -92,9 +92,17 @@ def inject_custom_css():
         .stApp {{ background: var(--paper); }}
 
         [data-testid="stAppViewContainer"] .block-container {{
-            padding-top: 2.25rem;
+            padding-top: 4.5rem !important;
             padding-bottom: 3rem;
             max-width: 1180px;
+        }}
+
+        /* Streamlit's fixed top toolbar sits above the content at scroll position 0;
+           without enough clearance above it clips the first element (the masthead
+           eyebrow). Blend it into the page background instead of hiding it, since it
+           still holds the sidebar toggle. */
+        [data-testid="stHeader"] {{
+            background: var(--paper);
         }}
 
         /* ---- Typography ---- */
@@ -136,33 +144,38 @@ def inject_custom_css():
         .eyebrow.sub {{ color: var(--primary-soft); }}
 
         /* ---- Masthead ---- */
+        .masthead {{
+            text-align: center;
+            max-width: 860px;
+            margin: 0 auto 0.5rem auto;
+        }}
         .masthead-eyebrow {{
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.78rem;
             letter-spacing: 0.18em;
             text-transform: uppercase;
             color: var(--primary-soft);
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.6rem;
         }}
         .masthead-title {{
-            font-family: 'Source Serif 4', serif;
-            font-size: 2.15rem;
-            font-weight: 600;
-            color: var(--ink);
-            margin: 0;
-            line-height: 1.18;
+            font-family: 'Source Serif 4', serif !important;
+            font-size: 3.3rem !important;
+            font-weight: 700 !important;
+            color: var(--ink) !important;
+            margin: 0 !important;
+            line-height: 1.2 !important;
         }}
         .masthead-sub {{
             font-family: 'Public Sans', sans-serif;
             color: var(--ink-soft);
             font-size: 1rem;
-            margin-top: 0.4rem;
+            margin-top: 0.6rem;
         }}
         .masthead-rule {{
             height: 3px;
             width: 60px;
             background: var(--accent);
-            margin: 1rem 0 0.4rem 0;
+            margin: 1.1rem auto 0.4rem auto;
             border-radius: 2px;
         }}
 
@@ -205,7 +218,12 @@ def inject_custom_css():
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius);
-            padding: 0.95rem 1.1rem 0.75rem 1.1rem;
+            padding: 0.95rem 1.1rem 0.85rem 1.1rem;
+            min-height: 108px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            box-sizing: border-box;
         }}
         [data-testid="stMetricLabel"] p {{
             font-family: 'IBM Plex Mono', monospace !important;
@@ -213,40 +231,66 @@ def inject_custom_css():
             letter-spacing: 0.06em;
             font-size: 0.7rem !important;
             color: var(--ink-soft) !important;
+            white-space: normal !important;
+            line-height: 1.35;
         }}
         [data-testid="stMetricValue"] {{
             font-family: 'IBM Plex Mono', monospace !important;
             color: var(--primary) !important;
             font-weight: 600 !important;
+            font-size: 1.55rem !important;
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: unset !important;
+            line-height: 1.25;
+        }}
+        [data-testid="stMetricDelta"] {{
+            font-family: 'IBM Plex Mono', monospace !important;
+        }}
+        /* Every stHorizontalBlock row of metrics stretches its columns to equal
+           height, so metric cards line up even when labels wrap differently. */
+        [data-testid="stHorizontalBlock"] {{
+            align-items: stretch;
+        }}
+        [data-testid="stHorizontalBlock"] [data-testid="stVerticalBlock"] {{
+            height: 100%;
+        }}
+        [data-testid="stHorizontalBlock"] [data-testid="stMetric"] {{
+            height: 100%;
         }}
 
         /* ---- Tabs ---- */
-        [data-testid="stTabs"] [data-baseweb="tab-list"] {{
-            gap: 4px;
+        [data-testid="stTabs"] [role="tablist"] {{
+            display: flex;
+            width: 100%;
             border-bottom: 1px solid var(--border);
+            gap: 0;
         }}
         [data-testid="stTab"] {{
+            flex: 1 1 0;
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
             font-family: 'IBM Plex Mono', monospace !important;
-            font-size: 0.82rem !important;
+            font-size: 0.8rem !important;
             letter-spacing: 0.02em;
             color: var(--ink-soft) !important;
+            border-bottom: 2.5px solid transparent !important;
+            padding: 0.7rem 0.5rem !important;
         }}
         [data-testid="stTab"] p {{
             font-family: 'IBM Plex Mono', monospace !important;
-            font-size: 0.82rem !important;
+            font-size: 0.8rem !important;
+            text-align: center;
         }}
         [data-testid="stTab"][aria-selected="true"] {{
             color: var(--primary) !important;
+            border-bottom: 2.5px solid var(--accent) !important;
         }}
         [data-testid="stTab"][aria-selected="true"] p {{
             color: var(--primary) !important;
             font-weight: 600 !important;
         }}
-        [data-baseweb="tab-highlight"] {{
-            background-color: var(--accent) !important;
-            height: 2.5px !important;
-        }}
-        [data-baseweb="tab-border"] {{ background-color: var(--border) !important; }}
 
         /* ---- DataFrame / tables ---- */
         [data-testid="stDataFrame"] {{
@@ -286,6 +330,28 @@ def inject_custom_css():
             font-family: 'Public Sans', sans-serif;
         }}
 
+        /* ---- Number input (MDE toggles) ---- */
+        [data-testid="stNumberInputContainer"] {{
+            background: var(--surface) !important;
+            border: 1.5px solid var(--border) !important;
+            border-radius: 8px !important;
+        }}
+        [data-testid="stNumberInputContainer"]:focus-within {{
+            border-color: var(--primary-soft) !important;
+        }}
+        [data-testid="stNumberInputField"] {{
+            color: var(--ink) !important;
+            font-family: 'IBM Plex Mono', monospace !important;
+            background: var(--surface) !important;
+        }}
+        [data-testid="stNumberInputStepUp"], [data-testid="stNumberInputStepDown"] {{
+            background: var(--surface-alt) !important;
+            color: var(--primary) !important;
+        }}
+        [data-testid="stNumberInputStepUp"]:hover, [data-testid="stNumberInputStepDown"]:hover {{
+            background: var(--border) !important;
+        }}
+
         /* ---- Expander ---- */
         [data-testid="stExpander"] {{
             border: 1px solid var(--border);
@@ -305,6 +371,43 @@ def inject_custom_css():
             border-radius: var(--radius);
             padding: 1.1rem 1.25rem;
         }}
+
+        /* ---- Critique tab: source badge pill ---- */
+        .source-pill {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            font-weight: 600;
+            padding: 0.3rem 0.7rem;
+            border-radius: 999px;
+            margin-bottom: 1rem;
+        }}
+        .source-pill.live {{
+            background: #E4F1E8;
+            color: #2F6B47;
+            border: 1px solid #BFDFC9;
+        }}
+        .source-pill.fallback {{
+            background: #FBF1DE;
+            color: #8A6416;
+            border: 1px solid #EEDCB0;
+        }}
+        .critique-card {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--primary-soft);
+            border-radius: var(--radius);
+            padding: 1.3rem 1.5rem;
+            font-family: 'Public Sans', sans-serif;
+            line-height: 1.65;
+        }}
+        .critique-card ul {{ margin: 0; padding-left: 1.2rem; }}
+        .critique-card li {{ margin-bottom: 0.55rem; }}
+        .critique-card li:last-child {{ margin-bottom: 0; }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -504,21 +607,26 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Masthead
 # ---------------------------------------------------------------------------
-st.markdown('<div class="masthead-eyebrow">Causal Inference &middot; Validation Report</div>', unsafe_allow_html=True)
-st.markdown('<p class="masthead-title">Causal Impact &amp; Heterogeneous Response Analysis</p>', unsafe_allow_html=True)
-st.markdown('<div class="masthead-rule"></div>', unsafe_allow_html=True)
 st.markdown(
-    '<p class="masthead-sub">Criteo Uplift Modeling Dataset (v2.1) &middot; validation, heterogeneity, and sensitivity analysis</p>',
+    """
+    <div class="masthead">
+        <div class="masthead-eyebrow">Causal Inference &middot; Validation Report</div>
+        <p class="masthead-title">Causal Impact &amp; Heterogeneous Response Analysis</p>
+        <div class="masthead-rule"></div>
+        <p class="masthead-sub">Criteo Uplift Modeling Dataset (v2.1) &middot; validation, heterogeneity, and sensitivity analysis</p>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
-tab1, tab1_5, tab2, tab3, tab4 = st.tabs(
+tab1, tab1_5, tab2, tab3, tab4, tab5 = st.tabs(
     [
         "01 &middot; Validation",
         "01.5 &middot; Outcome",
         "02 &middot; Heterogeneity",
         "03 &middot; Rigor",
         "04 &middot; Sensitivity",
+        "05 &middot; Critique",
     ]
 )
 
@@ -631,8 +739,8 @@ with tab1:
             mc1, mc2, mc3 = st.columns(3)
             mc1.metric(
                 "Treated units matched",
-                f"{match_diag['n_pairs']:,} / {match_diag['n_treated_total']:,}",
                 f"{100 * match_diag['match_rate']:.1f}%",
+                help=f"{match_diag['n_pairs']:,} of {match_diag['n_treated_total']:,} treated units",
             )
             mc2.metric("Distinct controls used", f"{match_diag['n_control_unique']:,}")
             controls_match = match_diag["n_control_unique"] == match_diag["n_pairs"]
@@ -851,19 +959,33 @@ with tab4:
             download_button(bounds_df, "Rosenbaum bounds", "rosenbaum_bounds.csv")
             freshness_caption("rosenbaum_bounds.csv")
 
-    eyebrow("Stage 04", sub=True)
-    st.header("Diagnostic Critique (LLM)")
+# ---------------------------------------------------------------------------
+# Section 5: Diagnostic critique (LLM)
+# ---------------------------------------------------------------------------
+with tab5:
+    eyebrow("Stage 05")
+    st.header("Diagnostic Critique")
+    st.write(
+        "An automated second read of the diagnostics above, checking whether the numbers "
+        "actually support the conclusions drawn from them, generated after Section 4."
+    )
+
     critique = load_json_fresh("critique.json")
     if critique is None:
         missing_data_notice("Diagnostic critique", "notebooks/03_sensitivity.ipynb")
     else:
-        if critique["source"] == "rule_based_fallback":
-            st.warning(
-                "Rule-based fallback, not an actual LLM response "
-                "(no Groq/NIM API key was configured when this was generated).",
-                icon=":material/settings:",
+        is_fallback = critique["source"] == "rule_based_fallback"
+        pill_cls = "fallback" if is_fallback else "live"
+        pill_text = "Rule-based fallback" if is_fallback else f"Live LLM &middot; {critique['source']}"
+        st.markdown(f'<div class="source-pill {pill_cls}">{pill_text}</div>', unsafe_allow_html=True)
+
+        if is_fallback:
+            st.caption(
+                "No Groq/NIM API key was configured when this was generated, so this is a "
+                "rule-based fallback, not an actual LLM response."
             )
-        else:
-            st.success(f"Live LLM response via **{critique['source']}**", icon=":material/smart_toy:")
-        st.markdown(critique["critique_text"])
+
+        with st.container(border=True):
+            st.markdown(critique["critique_text"])
+
         freshness_caption("critique.json")
