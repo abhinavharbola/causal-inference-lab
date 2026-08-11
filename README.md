@@ -12,7 +12,7 @@ Built as a portfolio project on entirely free-tier infrastructure: no paid APIs,
   <sub><em>Section 1, Validation: the ground-truth ATE and its confidence interval, the first of six pipeline-stage tabs.</em></sub>
 </p>
 
-Additional per-stage screenshots (`01_validation`, `01.5_outcome.png`, `02_heterogeneity.png`, `03_rigor.png`, `04_sensitivity.png`, `05_critique.png`) go in [`assets/`](assets/) using that naming convention, one per dashboard tab.
+Additional screenshots (`01_validation`, `01.5_outcome.png`, `02_heterogeneity.png`, `03_rigor.png`, `04_sensitivity.png`, `05_critique.png`) are in [`assets/`](assets/) using that naming convention, one per dashboard tab.
 
 ## What this is
 
