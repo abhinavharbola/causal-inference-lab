@@ -1,6 +1,6 @@
 # Causal Impact & Heterogeneous Response Analysis
 
-A causal inference pipeline that takes randomized ad-exposure data and delivers validated answers to two key questions: What was the average treatment effect, and who actually benefited? Every estimator is benchmarked against known ground truth before being trusted, and every segment-level finding is statistically validated before it’s reported.
+A causal inference pipeline that turns randomized ad-exposure data into two validated answers: What was the overall impact, and which audiences actually responded? Each estimator is validated against known ground truth, and every segment-level result is rigorously tested for statistical significance before it’s reported.
 
 Built as a portfolio project on entirely free-tier infrastructure: no paid APIs, no GPU, no local model weights, just scikit-learn's own classifiers. Runs end-to-end on a 16GB, no-GPU laptop.
 
@@ -94,7 +94,7 @@ A calibrated **T-learner** estimates CATE; causal forests are future work. A hel
 
 Users are clustered on pre-treatment covariates, with quantile segmentation as an alternative. Segment treatment effects include bootstrap CIs.
 
-- ### Section 3: Statistical rigor
+- ### Section 3: Statistical rigor and Corrections
 
 **Benjamini-Hochberg** correction controls multiple testing across segments. Per-segment power analysis checks whether each segment can detect the claimed effect.
 
@@ -104,7 +104,7 @@ Power is anchored to the Section 1 ground-truth ATE, avoiding circularity. If gr
 
 **Rosenbaum bounds** are applied to the calibrated PSM matched pairs, yielding the critical **Gamma**: the unmeasured-confounding strength needed to overturn the conclusion.
 
-- ### Section 5: The one LLM step
+- ### Section 5: The one (and only) LLM step
 
 One diagnostic critique uses balance, overlap, and Rosenbaum outputs to flag likely assumption violations in plain language.
 
