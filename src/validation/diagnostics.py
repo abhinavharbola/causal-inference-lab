@@ -146,11 +146,6 @@ def run_full_diagnostics(
     match_rate = n_pairs / n_treated_total if n_treated_total > 0 else 0.0
 
     if n_control_unique != n_pairs:
-        # Matching is meant to be strictly 1:1 without replacement (see
-        # get_matched_pairs). If a control row's covariates repeat across pairs
-        # here, the matched sample is not what balance_table/overlap_diagnostics/
-        # Rosenbaum bounds assume it is, so surface it loudly rather than silently
-        # reporting a balance table for pairs that aren't really independent.
         logger.warning(
             "%d matched pairs but only %d distinct control rows were used — "
             "matching is not behaving as strict 1:1 without replacement.",

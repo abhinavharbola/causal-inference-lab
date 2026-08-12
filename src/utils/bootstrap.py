@@ -118,16 +118,6 @@ def bootstrap_mean_ci(
     alpha: float = 0.05,
     random_state: int = None,
 ) -> dict:
-    """Percentile bootstrap CI for the mean of a fixed, precomputed per-unit score array.
-
-    Use this instead of `bootstrap_ci` when the estimator involves fitting a model
-    (e.g. AIPW's outcome-regression nuisance models): fit the model once on the full
-    sample, reduce each unit to a single scalar score, then bootstrap by resampling
-    that array. This is the standard way to get a fast, real CI without refitting an
-    ML model on every one of the n_bootstrap resamples, at the cost of treating the
-    nuisance model as fixed rather than re-estimated per resample (a common,
-    well-understood simplification, not the same as a fully nonparametric bootstrap).
-    """
     rng = np.random.default_rng(random_state)
     n = len(scores)
     point_estimate = float(np.mean(scores))

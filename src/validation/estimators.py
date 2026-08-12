@@ -99,11 +99,6 @@ def psm_pair_diffs(
     treatment_col: str,
     pair_id_col: str = "_pair_id",
 ) -> np.ndarray:
-    """Per-pair (treated outcome - control outcome), for pair-level bootstrapping.
-
-    Resampling whole pairs (rather than individual rows) is what preserves the
-    matched design when computing a bootstrap CI for `psm_ate`.
-    """
     treated = matched_df.loc[matched_df[treatment_col] == 1, [pair_id_col, outcome_col]]
     control = matched_df.loc[matched_df[treatment_col] == 0, [pair_id_col, outcome_col]]
     merged = treated.merge(control, on=pair_id_col, suffixes=("_treated", "_control"))
@@ -117,25 +112,6 @@ def get_matched_pairs(
     caliper: float = 0.2,
     random_state: int = None,
 ) -> pd.DataFrame:
-    """Greedy 1:1 nearest-neighbor matching WITHOUT replacement.
-
-    Each control unit is matched to at most one treated unit. This matters for two
-    reasons downstream: (1) Rosenbaum sensitivity bounds and any pair-level variance
-    estimate assume independent matched pairs, which breaks if the same control is
-    reused across many pairs; (2) a matched-pairs balance/overlap diagnostic is only
-    meaningful if "pairs" really are 1:1 correspondences.
-
-    Because control units cannot be reused, and this dataset has an imbalanced
-    treatment allocation (~85% treated), the number of matched pairs is capped by
-    the size of the control pool: most treated units will go unmatched even before
-    the caliper is applied. That is expected, correct behavior for strict 1:1
-    matching under an imbalanced design, not a bug — see `match_rate` in
-    `run_full_diagnostics` for how much of the treated group this discards.
-
-    Matching order is randomized (not sorted by propensity) so results don't
-    systematically favor either tail of the propensity distribution when the
-    control pool runs out; pass `random_state` for reproducibility.
-    """
     treated = df[df[treatment_col] == 1].reset_index(drop=True)
     control = df[df[treatment_col] == 0].reset_index(drop=True)
 
@@ -145,9 +121,6 @@ def get_matched_pairs(
     rng = np.random.default_rng(random_state)
     match_order = rng.permutation(len(treated))
 
-    # SortedList of (propensity, control_row_index) gives O(log n) nearest-neighbor
-    # lookup AND O(log n) removal, so strict without-replacement matching stays
-    # tractable at this project's scale (tens of thousands of controls).
     available = SortedList((control.loc[i, propensity_col], i) for i in control.index)
 
     matched_treated_idx = []
@@ -215,13 +188,6 @@ def aipw_scores(
     propensity_col: str,
     max_iter: int = 5000,
 ) -> np.ndarray:
-    """Per-unit doubly-robust pseudo-outcome (aipw_treated - aipw_control).
-
-    `aipw_ate` is just the mean of this array. Exposed separately so the outcome
-    models can be fit ONCE and the resulting fixed scores bootstrapped cheaply
-    (see `run_estimator_comparison_with_ci`), instead of refitting two logistic
-    regressions on every bootstrap resample.
-    """
     T = df[treatment_col].to_numpy()
     Y = df[outcome_col].to_numpy()
     e = df[propensity_col].to_numpy()
@@ -293,22 +259,6 @@ def run_estimator_comparison_with_ci(
     alpha: float = 0.05,
     random_state: int = None,
 ) -> dict:
-    """Point estimate + real bootstrap CI for all four estimators.
-
-    Each method is bootstrapped in whatever way is both valid and cheap for it,
-    rather than refitting every model from scratch on every resample:
-      - naive_ols: resample rows, refit OLS each time (fast, no ML model).
-      - psm: resample whole matched PAIRS (not raw rows), preserving the paired
-        design that the point estimate itself relies on.
-      - ipw: resample rows, recompute the Hajek ratio using the already-fitted
-        propensity scores (cheap arithmetic, no refitting).
-      - aipw: fit the two outcome-regression models ONCE, reduce to a fixed
-        per-unit score, then bootstrap that array. Refitting AIPW's nuisance
-        models on every one of n_bootstrap resamples would be far too slow to
-        run repeatedly on a CPU-only machine.
-
-    Returns {method: {point_estimate, ci_lower, ci_upper}}.
-    """
     propensity = fit_propensity_score(df, treatment_col, covariate_cols)
     df = df.copy()
     df["_propensity"] = propensity

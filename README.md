@@ -7,9 +7,9 @@ Built as a portfolio project on entirely free-tier infrastructure: no paid APIs,
 ## Preview
 
 <p align="center">
-  <img src="assets/dashboard.png" width="720" alt="Streamlit dashboard showing the masthead, all six pipeline-stage tabs spanning the full width, and Section 1's ground-truth ATE metrics">
+  <img src="assets/dashboard.png" width="720" alt="Streamlit dashboard showing the masthead, all six pipeline-stage tabs spanning the full width, and Section 2's Segment-level CATE Breakdown">
   <br>
-  <sub><em>Section 1, Validation: the ground-truth ATE and its confidence interval, the first of six pipeline-stage tabs.</em></sub>
+  <sub><em>Section 2, Heterogeneity: segment-level CATE breakdown, the third of six pipeline-stage tabs.</em></sub>
 </p>
 
 Additional screenshots (`01_validation`, `01.5_outcome.png`, `02_heterogeneity.png`, `03_rigor.png`, `04_sensitivity.png`, `05_critique.png`) are in [`assets/`](assets/) using that naming convention, one per dashboard tab.
@@ -76,43 +76,39 @@ flowchart TD
 
 ### Section 1: Validation via self-induced confounding
 
-The ground-truth ATE is computed directly from the full randomized dataset (analytic Wald CI, bootstrapping ~13.9M rows would cost real compute for no statistical gain at that sample size).
+Ground-truth ATE is computed analytically from the full randomized dataset; bootstrapping ~13.9M rows adds cost without meaningful benefit.
 
-Confounding is induced with a parameterized retention rule, not by dropping units on an outcome-correlated covariate alone (which doesn't reliably bias a treatment effect estimate in already-randomized data):
+Confounding is induced via:
 
-```
+```text
 retention_probability = sigmoid(g0 + g1·X + g2·X·T)
 ```
 
-`X` is selected by correlation with the outcome, not arbitrarily, an outcome-irrelevant `X` would let `g2` grow indefinitely without ever biasing the naive estimate, since the whole point of the interaction term is that it only creates real confounding when `X` actually predicts the outcome.
+`X` is selected for outcome correlation so the interaction can create genuine confounding. A calibration loop increases `g2` until both treatment imbalance and naive-estimate bias are detected, with a capped `max_iters` and explicit `converged: False` on failure.
 
-A **calibration loop** increases `g2` until a two-part validation gate passes: (a) `corr(X, T)` is significantly nonzero in the retained sample, and (b) the naive difference-in-means estimate falls outside the ground-truth CI. The loop is capped at `max_iters` and reports `converged: False` explicitly if the gate never trips, rather than looping forever or silently accepting an uncalibrated severity.
-
-The full estimator comparison, naive OLS, propensity score matching (with balance diagnostics), IPW, and AIPW, runs across four severities (none / mild / moderate / strong), producing the project's central diagnostic: a **bias-severity curve** showing naive estimation break down while matching/weighting stay comparatively robust. Each point on that curve carries a real bootstrap confidence interval (`run_estimator_comparison_with_ci`), not a fixed-width heuristic, computed without refitting AIPW's nuisance models on every resample (see the function's docstring for how).
-
-Matching (`get_matched_pairs`) is strict 1:1 without replacement: every control row is used in at most one pair. Under this dataset's ~85/15 treated/control split, that caps the number of matched pairs at the size of the control group, so most treated units go unmatched — expected behavior for a genuine matched-pairs design, not a bug, and reported explicitly as a match rate alongside the balance table.
+Naive OLS, PSM, IPW, and AIPW are compared across four confounding severities, producing a bias-severity curve. Each estimate has a real bootstrap CI. PSM is strict 1:1 without replacement, so the ~85/15 treatment/control split naturally leaves many treated units unmatched; match rate and balance are reported.
 
 ### Section 2: Heterogeneity
 
-A **T-learner** is the primary CATE method, simpler and more defensible to explain than a causal forest, which is documented as a future extension rather than built (see below). Base classifiers are calibrated (`CalibratedClassifierCV`), since `visit`'s low base rate makes uncalibrated probability estimates noisy in exactly the way that gets amplified by taking a difference of two of them.
+A calibrated **T-learner** estimates CATE; causal forests are future work. A held-out **Qini coefficient** validates uplift ranking against random targeting.
 
-The T-learner's output is never assumed correct just because it ran, a **Qini coefficient** against a held-out split quantifies whether it actually ranks units by uplift better than random targeting.
-
-Users are segmented via unsupervised clustering on pre-treatment covariates (Criteo's covariates are anonymized floats, not literal recency/frequency/value fields, so clustering is the natural default; a business-style quantile split is available as a simpler alternative). Per-segment treatment effects are estimated with bootstrap confidence intervals.
+Users are clustered on pre-treatment covariates, with quantile segmentation as an alternative. Segment treatment effects include bootstrap CIs.
 
 ### Section 3: Statistical rigor
 
-Testing many segments at once inflates the false-positive rate, so **Benjamini-Hochberg correction** is applied before any segment is called significant. A **per-segment power analysis** separately checks whether each segment is even large enough to detect the effect size being claimed, a common real-world mistake this project deliberately surfaces rather than glosses over.
+**Benjamini-Hochberg** correction controls multiple testing across segments. Per-segment power analysis checks whether each segment can detect the claimed effect.
 
-The power analysis anchors its assumed effect size on Section 1's ground-truth ATE (loaded from `data/processed/ground_truth.json`) rather than on the segment effects computed earlier in the same notebook, using the same effects to set the target and then to test against it is circular and overstates how informative the power numbers are. If `01_validation.ipynb` hasn't been run yet, the notebook falls back to the segment-effect median and says so explicitly, flagging that fallback as illustrative only.
+Power is anchored to the Section 1 ground-truth ATE, avoiding circularity. If ground truth is unavailable, the segment-effect median is used as an explicitly illustrative fallback.
 
 ### Section 4: Sensitivity analysis
 
-**Rosenbaum bounds** run specifically on the PSM matched-pairs output from Section 1, at the calibrated confounding severity, not on IPW/AIPW estimates, since Rosenbaum bounds are defined in terms of matched pairs and there's no equivalent structure for a weighting-based estimator. The output is the critical Gamma: how strong an unmeasured confounder would need to be, in odds-ratio terms, to overturn the matched-pairs conclusion.
+**Rosenbaum bounds** are applied to the calibrated PSM matched pairs, yielding the critical **Gamma**: the unmeasured-confounding strength needed to overturn the conclusion.
 
 ### Section 5: The one LLM step
 
-A single diagnostic critique reads the balance table, overlap diagnostics, and Rosenbaum sensitivity output, and produces a short plain-language flag of likely assumption violations for a non-technical stakeholder. **Groq is the primary provider, NVIDIA NIM the fallback** (both free tier, both serving `openai/gpt-oss-120b`), with a deterministic rule-based fallback if neither is reachable. This is a small, clearly bounded diagnostic utility, it does not generate narrative reports, does not summarize the project, does not write this README, and is not used anywhere in Sections 2 or 3. Nothing else in this project calls an LLM.
+One diagnostic critique uses balance, overlap, and Rosenbaum outputs to flag likely assumption violations in plain language.
+
+**Groq** is primary, **NVIDIA NIM** is fallback, and a deterministic rule-based fallback is used if both fail. The LLM is not used for reporting, summarization, the README, Sections 2–3, or anywhere else.
 
 ## Methods
 
@@ -127,11 +123,11 @@ A single diagnostic critique reads the balance table, overlap diagnostics, and R
 
 ## Guardrails
 
-- **Calibration never silently succeeds.** If the two-part validation gate (correlation + naive estimate outside CI) never trips within `max_iters`, the loop reports `converged: False` explicitly rather than looping forever or accepting an uncalibrated severity.
-- **Matching is strict 1:1, never reused.** `get_matched_pairs` removes a control from the pool the moment it's matched; a reported match rate reflects real 1:1 correspondence, not one inflated by reusing the same control across many pairs.
-- **Power analysis flags its own weakest link.** If Section 1 hasn't been run yet, Section 3's per-segment power analysis falls back to a post-hoc, less-defensible effect-size estimate, and prints a warning saying so, rather than quietly reporting a number that looks equally authoritative either way.
-- **Data integrity fails loudly, not silently.** Row count, columns, and treatment/control split are checked against documented values immediately after load, and the pipeline stops rather than continuing on drifted data.
-- **The LLM step never touches a number.** The diagnostic critique reads already-computed diagnostics and narrates them in plain language; it cannot alter an estimate, a p-value, or a bound, and if it's unreachable the pipeline degrades to a deterministic rule-based critique rather than skipping the step outright.
+* **Calibration fails loudly:** If the validation gate doesn't pass within `max_iters`, it reports `converged: False` rather than accepting an uncalibrated severity.
+* **Matching is true 1:1:** Controls are removed once matched, preventing reuse and inflated match rates.
+* **Power analysis flags weak inputs:** If Section 1 hasn't run, the fallback effect size is clearly labeled as less defensible rather than presented as authoritative.
+* **Data integrity is enforced:** Row count, columns, and treatment/control split are validated on load; drift stops the pipeline.
+* **The LLM cannot change results:** It only interprets existing diagnostics. Estimates, p-values, and bounds are untouched, and an unavailable LLM triggers a deterministic fallback.
 
 ## Project Structure
 ```
