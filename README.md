@@ -1,6 +1,6 @@
 # Causal Impact & Heterogeneous Response Analysis
 
-A causal inference pipeline that takes a randomized ad-exposure dataset and files a validated answer to two questions: what was the average effect, and who did it actually work on, with every estimator checked against a known ground truth before it's trusted, and every segment-level claim checked for statistical validity before it's reported.
+A causal inference pipeline that takes randomized ad-exposure data and delivers validated answers to two key questions: What was the average treatment effect, and who actually benefited? Every estimator is benchmarked against known ground truth before being trusted, and every segment-level finding is statistically validated before it’s reported.
 
 Built as a portfolio project on entirely free-tier infrastructure: no paid APIs, no GPU, no local model weights, just scikit-learn's own classifiers. Runs end-to-end on a 16GB, no-GPU laptop.
 
@@ -9,7 +9,7 @@ Built as a portfolio project on entirely free-tier infrastructure: no paid APIs,
 <p align="center">
   <img src="assets/dashboard.png" width="720" alt="Streamlit dashboard showing the masthead, all six pipeline-stage tabs spanning the full width, and Section 2's Segment-level CATE Breakdown">
   <br>
-  <sub><em>Section 2, Heterogeneity: segment-level CATE breakdown, the third of six pipeline-stage tabs.</em></sub>
+  <sub><em>Section 2, Heterogeneity: Third of six pipeline-stage tabs.</em></sub>
 </p>
 
 Additional screenshots (`01_validation`, `01.5_outcome.png`, `02_heterogeneity.png`, `03_rigor.png`, `04_sensitivity.png`, `05_critique.png`) are in [`assets/`](assets/) using that naming convention, one per dashboard tab.
@@ -74,7 +74,7 @@ flowchart TD
     critique --> dash
 ```
 
-### Section 1: Validation via self-induced confounding
+- ### Section 1: Validation via self-induced confounding
 
 Ground-truth ATE is computed analytically from the full randomized dataset; bootstrapping ~13.9M rows adds cost without meaningful benefit.
 
@@ -88,23 +88,23 @@ retention_probability = sigmoid(g0 + g1·X + g2·X·T)
 
 Naive OLS, PSM, IPW, and AIPW are compared across four confounding severities, producing a bias-severity curve. Each estimate has a real bootstrap CI. PSM is strict 1:1 without replacement, so the ~85/15 treatment/control split naturally leaves many treated units unmatched; match rate and balance are reported.
 
-### Section 2: Heterogeneity
+- ### Section 2: Heterogeneity
 
 A calibrated **T-learner** estimates CATE; causal forests are future work. A held-out **Qini coefficient** validates uplift ranking against random targeting.
 
 Users are clustered on pre-treatment covariates, with quantile segmentation as an alternative. Segment treatment effects include bootstrap CIs.
 
-### Section 3: Statistical rigor
+- ### Section 3: Statistical rigor
 
 **Benjamini-Hochberg** correction controls multiple testing across segments. Per-segment power analysis checks whether each segment can detect the claimed effect.
 
 Power is anchored to the Section 1 ground-truth ATE, avoiding circularity. If ground truth is unavailable, the segment-effect median is used as an explicitly illustrative fallback.
 
-### Section 4: Sensitivity analysis
+- ### Section 4: Sensitivity analysis
 
 **Rosenbaum bounds** are applied to the calibrated PSM matched pairs, yielding the critical **Gamma**: the unmeasured-confounding strength needed to overturn the conclusion.
 
-### Section 5: The one LLM step
+- ### Section 5: The one LLM step
 
 One diagnostic critique uses balance, overlap, and Rosenbaum outputs to flag likely assumption violations in plain language.
 
