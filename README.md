@@ -1,6 +1,6 @@
 # Causal Impact & Heterogeneous Response Analysis
 
-A causal inference pipeline that turns randomized ad-exposure data into two validated answers: What was the overall impact, and which audiences actually responded? Each estimator is validated against known ground truth, and every segment-level result is rigorously tested for statistical significance before it’s reported.
+A causal inference pipeline that turns randomized ad-exposure data into two validated answers: overall impact and which audiences actually responded, with each estimator benchmarked against known ground truth and every segment-level result rigorously tested for statistical significance.
 
 Built as a portfolio project on entirely free-tier infrastructure: no paid APIs, no GPU, no local model weights, just scikit-learn's own classifiers. Runs end-to-end on a 16GB, no-GPU laptop.
 
