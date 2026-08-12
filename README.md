@@ -240,7 +240,7 @@ pytest tests/ -v
 
 ## Known limitations
 
-- Matching (Sections 1 & 4) is strict 1:1 without replacement; under this dataset's ~85/15 treated/control split that discards most treated units by design (see [Explicitly Out of Scope](#explicitly-out-of-scope)). The reported match rate makes this visible in the dashboard rather than hiding it.
+- Matching (Sections 1 & 4) is strict 1:1 without replacement; under this dataset's ~85/15 treated/control split that discards most treated units by design. The reported match rate makes this visible in the dashboard rather than hiding it.
 - `conversion`'s ~0.3% base rate makes it unusable for segment-level work at CPU-feasible sample sizes (see the MDE table above); it's used only for the full-dataset ground-truth ATE.
 - Rosenbaum bounds are defined for matched pairs and are computed only against the PSM estimator; IPW and AIPW have no equivalent sensitivity check in this project.
 - The one LLM step depends on free-tier Groq/NVIDIA NIM availability; if both are unreachable, it falls back to a deterministic rule-based critique that is correct but less nuanced than a live LLM response.
