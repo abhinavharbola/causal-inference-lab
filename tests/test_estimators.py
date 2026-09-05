@@ -162,15 +162,22 @@ def test_get_matched_pairs_uses_each_control_at_most_once(rct_data):
     # control row across many treated units (matching with replacement), which
     # breaks the independence assumption Rosenbaum bounds rely on. Matching must
     # be strictly 1:1: every control row appears in at most one pair.
+    #
+    # Uses an explicit row-id column rather than dropping columns and
+    # deduplicating on covariate values: covariate-based dedup silently
+    # undercounts whenever two distinct rows share covariate values (e.g. the
+    # real dataset's bucketed f-columns), which would mask exactly the bug
+    # this test exists to catch. See test_diagnostics.py for the same fix
+    # applied to run_full_diagnostics.
     df, _ = rct_data
     df = df.copy()
     df["_propensity"] = fit_propensity_score(df, "treatment", ["f0", "f1"])
+    df["_row_id"] = np.arange(len(df))
 
     matched = get_matched_pairs(df, "treatment", "_propensity", caliper=0.2, random_state=0)
 
-    control_side = matched.loc[matched.treatment == 0].drop(columns=["_pair_id"])
     n_pairs = matched["_pair_id"].nunique()
-    n_unique_controls = control_side.drop_duplicates().shape[0]
+    n_unique_controls = matched.loc[matched.treatment == 0, "_row_id"].nunique()
 
     assert n_unique_controls == n_pairs
 
@@ -225,3 +232,4 @@ def test_run_estimator_comparison_with_ci_produces_valid_intervals(rct_data):
         # A real CI shouldn't collapse to a single fabricated width formula for
         # every method; at minimum it should have positive width.
         assert r["ci_upper"] > r["ci_lower"], method
+

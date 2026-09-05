@@ -1,3 +1,5 @@
+FILE: README.md
+================================================
 # Causal Impact & Heterogeneous Response Analysis
 
 A causal inference pipeline that turns randomized ad-exposure data into two validated answers: overall impact and which audiences actually responded, with each estimator benchmarked against known ground truth and every segment-level result rigorously tested for statistical significance.
@@ -56,7 +58,7 @@ flowchart TD
     raw[Criteo Uplift v2.1\nfull randomized dataset] --> gt[ground-truth ATE\nanalytic CI, full dataset]
     raw --> induce[induce + calibrate\nconfounding on a subsample]
     induce --> curve[bias-severity curve\nnaive OLS vs PSM vs IPW vs AIPW]
-    induce --> balance[balance + overlap\ndiagnostics on matched pairs]
+    induce --> balance[balance diagnostics on matched pairs\noverlap diagnostics on the candidate pool]
 
     gt --> mde[MDE check\nvisit vs conversion]
     mde -->|visit selected| cate[T-learner CATE\ncalibrated base classifiers]
@@ -87,6 +89,10 @@ retention_probability = sigmoid(g0 + g1·X + g2·X·T)
 `X` is selected for outcome correlation so the interaction can create genuine confounding. A calibration loop increases `g2` until both treatment imbalance and naive-estimate bias are detected, with a capped `max_iters` and explicit `converged: False` on failure.
 
 Naive OLS, PSM, IPW, and AIPW are compared across four confounding severities, producing a bias-severity curve. Each estimate has a real bootstrap CI. PSM is strict 1:1 without replacement, so the ~85/15 treatment/control split naturally leaves many treated units unmatched; match rate and balance are reported.
+
+- ### Section 1.5: Outcome selection
+
+Before segment-level work begins, an MDE calculation decides whether `visit` or `conversion` can support reliable per-segment estimation at CPU-feasible sample sizes; see [Why `visit`, not `conversion`](#why-visit-not-conversion) for the full table. `visit` is selected for Sections 2 and 3; `conversion` is used only for the Section 1 ground-truth ATE.
 
 - ### Section 2: Heterogeneity
 
@@ -244,3 +250,5 @@ pytest tests/ -v
 - `conversion`'s ~0.3% base rate makes it unusable for segment-level work at CPU-feasible sample sizes (see the MDE table above); it's used only for the full-dataset ground-truth ATE.
 - Rosenbaum bounds are defined for matched pairs and are computed only against the PSM estimator; IPW and AIPW have no equivalent sensitivity check in this project.
 - The one LLM step depends on free-tier Groq/NVIDIA NIM availability; if both are unreachable, it falls back to a deterministic rule-based critique that is correct but less nuanced than a live LLM response.
+
+

@@ -135,15 +135,37 @@ def run_full_diagnostics(
     caliper: float = 0.2,
     random_state: int = None,
 ) -> dict:
+    # Row identity, not covariate values, is what "each control used once" needs
+    # to check. Criteo's anonymized f0-f11 columns are bucketed, so distinct
+    # control rows routinely share identical covariate values; deduplicating on
+    # covariate_cols would undercount n_control_unique and could flag correct
+    # 1:1-without-replacement matching as broken. A synthetic id column survives
+    # get_matched_pairs (it just carries through like any other column) and lets
+    # us count actual distinct rows instead.
+    id_col = "_diagnostics_row_id"
+    df_before = df_before.copy()
+    df_before[id_col] = np.arange(len(df_before))
+
     matched = get_matched_pairs(df_before, treatment_col, propensity_col, caliper, random_state=random_state)
 
     balance = balance_table(df_before, matched, covariate_cols, treatment_col)
-    overlap = overlap_diagnostics(matched, propensity_col, treatment_col)
+    # Overlap must be measured on the pre-matching candidate pool, not on
+    # `matched`. apply_common_support_trim's "overlap" method derives its trim
+    # bounds from whatever population it's given, so running it on the matched
+    # output is close to tautological: matched pairs were already selected for
+    # being within a caliper of each other, so pct_within_overlap reads ~100%
+    # almost regardless of how little the original treated/control populations
+    # actually overlapped. Measuring it on df_before instead reports genuine
+    # overlap in the candidate pool, which is what the LLM critique's "common
+    # support overlap is strong/weak" flag is actually supposed to reflect.
+    overlap = overlap_diagnostics(df_before, propensity_col, treatment_col)
 
     n_treated_total = int((df_before[treatment_col] == 1).sum())
     n_pairs = int((matched[treatment_col] == 1).sum())
-    n_control_unique = matched.loc[matched[treatment_col] == 0].drop_duplicates(subset=covariate_cols).shape[0]
+    n_control_unique = int(matched.loc[matched[treatment_col] == 0, id_col].nunique())
     match_rate = n_pairs / n_treated_total if n_treated_total > 0 else 0.0
+
+    matched = matched.drop(columns=[id_col])
 
     if n_control_unique != n_pairs:
         logger.warning(
@@ -172,3 +194,4 @@ def run_full_diagnostics(
         "match_rate": match_rate,
         "n_control_unique": n_control_unique,
     }
+
