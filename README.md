@@ -171,6 +171,8 @@ causal-impact-lab/
 │   └── 03_sensitivity.ipynb       # Section 4
 │
 ├── dashboard/app.py               # Streamlit dashboard (reads db.py + data/processed/ artifacts)
+├── .streamlit/config.toml         # pins the dashboard's light theme so st.dataframe etc.
+│                                   # don't fall back to the viewer's own dark/light setting
 ├── tests/
 │
 ├── .env.example

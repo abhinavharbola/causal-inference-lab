@@ -1,0 +1,22 @@
+# Pins the app's visual theme so it renders identically regardless of the
+# viewer's own Streamlit light/dark preference.
+#
+# dashboard/app.py's inject_custom_css() re-themes every plain HTML/CSS
+# element (headers, metric cards, buttons, captions) via injected <style>,
+# and that works because those are ordinary DOM elements. st.dataframe's grid,
+# however, is rendered by a canvas-based widget that reads its palette from
+# Streamlit's theme config directly and ignores page-level CSS entirely. Without
+# this file, that grid falls back to auto-detecting the viewer's OS/browser
+# dark-mode setting -- which is why tables were rendering dark while every
+# other element on the same page rendered light: two different, uncoordinated
+# theme sources. These values are the same hex constants app.py already
+# defines (INK, PAPER, SURFACE, ACCENT), so the dataframe grid, checkboxes,
+# and any other native widget now match the custom CSS instead of drifting
+# from it.
+[theme]
+base = "light"
+primaryColor = "#B8862B"           # ACCENT -- checkbox check color, active widget accents
+backgroundColor = "#EEF0F3"        # PAPER -- main app background
+secondaryBackgroundColor = "#FFFFFF"  # SURFACE -- sidebar, dataframe grid, code block backgrounds
+textColor = "#1B1E24"              # INK
+font = "sans serif"

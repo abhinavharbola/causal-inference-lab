@@ -51,6 +51,18 @@ PRIMARY = "#223A5E"
 PRIMARY_SOFT = "#3D5A80"
 ACCENT = "#B8862B"
 
+# One chart size for every st.pyplot() figure in the app, sized against the
+# ~1180px content column (see .block-container max-width) and the 128px
+# metric-card height these charts usually sit under, rather than each call
+# site picking its own figsize. At CHART_DPI, this renders ~875x420px --
+# comfortably narrower than the content column and short enough that a chart
+# plus its heading and caption fit in a normal viewport without scrolling
+# mid-figure. Previously each chart used a different ad hoc figsize (up to
+# 8x5in), which at a legible DPI produced figures larger than the content
+# column itself.
+CHART_FIGSIZE = (7, 3.4)
+CHART_DPI = 125
+
 PALETTE = {
     "naive_ols": "#9B2226",
     "psm": "#3D6E8C",
@@ -301,9 +313,13 @@ def inject_custom_css():
             font-family: 'Public Sans', sans-serif !important;
             font-weight: 600 !important;
         }}
+        /* Was a full solid-navy invert on hover, which is a different, harsher
+           convention than the download buttons below (border/text shift only)
+           in the same dashboard. Matched to that quieter convention instead. */
         [data-testid="stBaseButton-secondary"]:hover {{
-            background: var(--primary) !important;
-            color: white !important;
+            background: var(--surface-alt) !important;
+            border-color: var(--primary) !important;
+            color: var(--primary) !important;
         }}
         [data-testid="stDownloadButton"] button {{
             border-radius: 8px !important;
@@ -319,9 +335,18 @@ def inject_custom_css():
         }}
 
         /* ---- Alerts ---- */
+        /* Matches the metric card's fixed height (set above) so a metric +
+           alert pair sitting side-by-side in the same st.columns row (e.g.
+           "Qini coefficient" / model-quality note, "Critical Gamma" /
+           fragility note) line up instead of the alert floating at whatever
+           height its text happens to need. */
         [data-testid="stAlert"] {{
             border-radius: var(--radius);
             font-family: 'Public Sans', sans-serif;
+            min-height: 128px;
+            display: flex;
+            align-items: center;
+            box-sizing: border-box;
         }}
 
         /* ---- Number input (MDE toggles) ---- */
@@ -443,6 +468,10 @@ plt.rcParams.update(
         "axes.facecolor": "none",
         "savefig.facecolor": "none",
         "legend.frameon": False,
+        # Charts now render at native figsize (see st.pyplot(..., width="content")
+        # below) instead of being stretched to fill the container, so CHART_DPI
+        # keeps them crisp at CHART_FIGSIZE's actual on-screen size.
+        "figure.dpi": CHART_DPI,
     }
 )
 
@@ -650,7 +679,7 @@ with tab1:
         severity_order = ["none", "mild", "moderate", "strong"]
         present_severities = [s for s in severity_order if s in runs_df["severity_label"].unique()]
 
-        fig, ax = _new_fig((8, 5))
+        fig, ax = _new_fig(CHART_FIGSIZE)
 
         for method, group in runs_df.groupby("method"):
             group = group.set_index("severity_label").reindex(present_severities).reset_index()
@@ -682,7 +711,7 @@ with tab1:
         ax.legend()
         fig.tight_layout()
 
-        st.pyplot(fig)
+        st.pyplot(fig, width="content")
 
         # Headline takeaway: which method is most/least biased at the strongest severity present.
         if ground_truth is not None and present_severities:
@@ -808,7 +837,7 @@ with tab2:
         download_button(segment_df, "segment effects", "segment_effects.csv")
         freshness_caption("segment_effects.csv")
 
-        fig, ax = _new_fig((8, 4))
+        fig, ax = _new_fig(CHART_FIGSIZE)
         y_pos = np.arange(len(segment_df))
         ax.errorbar(
             segment_df["point_estimate"],
@@ -828,7 +857,7 @@ with tab2:
         ax.set_xlabel("Estimated treatment effect")
         ax.set_title("Per-segment treatment effect with bootstrap CI")
         fig.tight_layout()
-        st.pyplot(fig)
+        st.pyplot(fig, width="content")
 
     st.subheader("Qini Curve (CATE model quality)")
     qini_result = load_json_fresh("qini_curve.json")
@@ -848,7 +877,7 @@ with tab2:
                 icon=":material/warning:",
             )
 
-        fig, ax = _new_fig((6, 5))
+        fig, ax = _new_fig(CHART_FIGSIZE)
         curve_x = qini_result["curve_x"]
         curve_y = qini_result["curve_y"]
         ax.plot(curve_x, curve_y, label="Model", color=PRIMARY_SOFT, linewidth=2)
@@ -861,7 +890,7 @@ with tab2:
         ax.set_ylabel("Cumulative incremental outcomes")
         ax.set_title("Qini Curve")
         fig.tight_layout()
-        st.pyplot(fig)
+        st.pyplot(fig, width="content")
         freshness_caption("qini_curve.json")
 
 # ---------------------------------------------------------------------------
@@ -876,10 +905,19 @@ with tab3:
     else:
         n_sig = int(segment_df["significant_after_correction"].sum())
         n_total = len(segment_df)
-        m1, m2 = st.columns(2)
-        m1.metric("Segments significant after BH correction", f"{n_sig} / {n_total}")
         n_sig_raw = int((segment_df["p_value"] < 0.05).sum())
-        m2.metric("Segments significant before correction", f"{n_sig_raw} / {n_total}", delta=n_sig - n_sig_raw)
+        m1, m2 = st.columns(2)
+        # The delta belongs on "after correction" (it's the thing correction
+        # changed), not on "before correction" where it previously sat -- and
+        # BH correction can only ever remove significance, never add it, so a
+        # delta of 0 means nothing to report; pass None rather than show a
+        # bare "0" badge.
+        m1.metric(
+            "Segments significant after BH correction",
+            f"{n_sig} / {n_total}",
+            delta=(n_sig - n_sig_raw) if n_sig != n_sig_raw else None,
+        )
+        m2.metric("Segments significant before correction", f"{n_sig_raw} / {n_total}")
 
         display_cols = ["segment", "p_value", "p_value_adjusted", "significant_after_correction"]
         st.dataframe(
@@ -938,7 +976,7 @@ with tab4:
             m2.success("Robust to every confounding strength checked in this table.", icon=":material/check_circle:")
         st.caption("Approximate value read off the saved bounds table's grid resolution, not re-solved exactly.")
 
-        fig, ax = _new_fig((6, 4))
+        fig, ax = _new_fig(CHART_FIGSIZE)
         ax.plot(bounds_df["gamma"], bounds_df["worst_case_p_value"], marker="o", markersize=3, color=PRIMARY_SOFT, linewidth=2)
         ax.axhline(alpha, linestyle="--", color="#9B2226", linewidth=1.5, label=f"alpha = {alpha}")
         ax.set_xlabel("Gamma (unmeasured confounding strength)")
@@ -946,7 +984,7 @@ with tab4:
         ax.set_title("Rosenbaum Sensitivity Bounds")
         ax.legend()
         fig.tight_layout()
-        st.pyplot(fig)
+        st.pyplot(fig, width="content")
 
         with st.expander("Show raw bounds table"):
             st.dataframe(bounds_df.style.format({"worst_case_p_value": "{:.4f}"}), width="stretch")

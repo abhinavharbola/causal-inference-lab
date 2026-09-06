@@ -33,9 +33,6 @@ logs/
 !logs/.gitkeep
 *.log
 
-# Streamlit
-.streamlit/
-
 # Testing / coverage
 .pytest_cache/
 .coverage
