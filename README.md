@@ -1,5 +1,3 @@
-FILE: README.md
-================================================
 # Causal Impact & Heterogeneous Response Analysis
 
 A causal inference pipeline that turns randomized ad-exposure data into two validated answers: overall impact and which audiences actually responded, with each estimator benchmarked against known ground truth and every segment-level result rigorously tested for statistical significance.
@@ -252,5 +250,3 @@ pytest tests/ -v
 - `conversion`'s ~0.3% base rate makes it unusable for segment-level work at CPU-feasible sample sizes (see the MDE table above); it's used only for the full-dataset ground-truth ATE.
 - Rosenbaum bounds are defined for matched pairs and are computed only against the PSM estimator; IPW and AIPW have no equivalent sensitivity check in this project.
 - The one LLM step depends on free-tier Groq/NVIDIA NIM availability; if both are unreachable, it falls back to a deterministic rule-based critique that is correct but less nuanced than a live LLM response.
-
-
