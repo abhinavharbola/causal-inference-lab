@@ -59,7 +59,8 @@ def test_run_full_diagnostics_measures_overlap_on_prematch_population(confounded
     assert result["overlap"]["n_total"] == len(confounded_data)
 
 
-
+@pytest.fixture
+def bucketed_confounded_data():
     # Regression fixture for a bug where n_control_unique was computed by
     # deduplicating on covariate_cols instead of row identity. Criteo's
     # anonymized f-columns are bucketed/discretized in production, so distinct
@@ -93,5 +94,3 @@ def test_run_full_diagnostics_counts_control_rows_not_covariate_values(bucketed_
     # n_control_unique must still equal n_pairs: get_matched_pairs matches 1:1
     # without replacement regardless of whether covariate values repeat.
     assert result["n_control_unique"] == result["n_pairs"]
-
-
