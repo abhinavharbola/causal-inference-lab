@@ -15,6 +15,15 @@ from src.utils.db import fetch_estimation_runs
 from src.utils.logging_config import configure_logging
 from src.utils.power_analysis import mde_comparison_table
 
+# Nothing here reads .env directly -- every credential is read via os.environ.get()
+# inside src/utils/db.py, src/utils/logging_config.py, and src/llm_critique/critique.py.
+# Without this, a .env file with real keys in it is silently ignored and every
+# provider falls back (SQLite instead of Supabase, console instead of Logfire,
+# rule-based instead of an actual LLM call) even though the keys are "set."
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+
 configure_logging()
 
 # Absolute, not relative to cwd: relative paths broke if the dashboard was ever

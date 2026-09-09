@@ -16,6 +16,9 @@ matplotlib>=3.8
 # Dashboard
 streamlit>=1.35
 
+# Env vars (.env -> os.environ; nothing else in this project reads .env directly)
+python-dotenv>=1.0
+
 # Database: Supabase primary, with a local SQLite fallback built into src/utils/db.py
 # (so the pipeline and dashboard work without any cloud account configured)
 supabase>=2.4

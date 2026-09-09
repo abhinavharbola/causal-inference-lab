@@ -14,7 +14,7 @@ write a report, do not add caveats beyond what the numbers given to you support.
 diagnostics look clean, say so plainly instead of inventing a concern."""
 
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
-DEFAULT_NIM_MODEL = "openai/gpt-oss-120b"
+DEFAULT_NIM_MODEL = "mistralai/mistral-nemotron"
 
 
 def format_diagnostics_summary(diagnostics: dict, rosenbaum_result: dict) -> str:

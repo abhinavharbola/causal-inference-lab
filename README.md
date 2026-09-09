@@ -1,3 +1,5 @@
+FILE: README.md
+================================================
 # Causal Impact & Heterogeneous Response Analysis
 
 A causal inference pipeline that turns randomized ad-exposure data into two validated answers: overall impact and which audiences actually responded, with each estimator benchmarked against known ground truth and every segment-level result rigorously tested for statistical significance.
@@ -187,8 +189,8 @@ causal-impact-lab/
 | Core libraries | `pandas`, `numpy`, `scikit-learn`, `statsmodels`, `scipy`, `scikit-uplift`, `sortedcontainers` (1:1 matching without replacement) |
 | Database | Supabase (primary), local SQLite (automatic fallback) |
 | Logging | Logfire (structured), console (automatic fallback) |
-| Dashboard | Streamlit, custom CSS (no separate stylesheet or build step) |
-| LLM | Groq (primary) → NVIDIA NIM (fallback), both serving `openai/gpt-oss-120b`, free tier |
+| Dashboard | Streamlit, custom CSS + a pinned `.streamlit/config.toml` theme (no separate stylesheet or build step) |
+| LLM | Groq (primary, `openai/gpt-oss-120b`) → NVIDIA NIM (fallback, `mistralai/mistral-nemotron`) → rule-based, free tier |
 
 ## Getting started
 
