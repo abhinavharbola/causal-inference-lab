@@ -20,7 +20,6 @@ streamlit>=1.35
 python-dotenv>=1.0
 
 # Database: Supabase primary, with a local SQLite fallback built into src/utils/db.py
-# (so the pipeline and dashboard work without any cloud account configured)
 supabase>=2.4
 
 # Logging

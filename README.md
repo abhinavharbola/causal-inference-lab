@@ -26,28 +26,28 @@ Given the Criteo Uplift dataset, the pipeline:
 
 ## Dataset
 
-**[Criteo Uplift Modeling Dataset, v2.1](https://huggingface.co/datasets/criteo/criteo-uplift)** (Diemert et al., 2018), ~13.9M rows from a real, randomized ad-exposure experiment in a live advertising system. v2.1 adds an `exposure` column on top of `treatment`. No registration or approval process required.
+**[Criteo Uplift Modeling Dataset, v2.1](https://huggingface.co/datasets/criteo/criteo-uplift)** (Diemert et al., 2018), 13,979,592 rows from a real, randomized ad-exposure experiment in a live advertising system. v2.1 adds an `exposure` column on top of `treatment`. No registration or approval process required.
 
 | Column | Type | Description |
 |---|---|---|
 | `f0`–`f11` | float | 12 anonymized dense covariates |
 | `treatment` | binary | 1 = treated, 0 = control |
 | `exposure` | binary | effective exposure flag (v2.1 addition) |
-| `visit` | binary | base rate ≈ 4–5% |
-| `conversion` | binary | base rate ≈ 0.3% |
+| `visit` | binary | base rate 4.70% |
+| `conversion` | binary | base rate 0.29% |
 
-Loaded via `datasets.load_dataset("criteo/criteo-uplift")` (Hugging Face), with `sklift.datasets.fetch_criteo(target_col='all', treatment_col='all')` as an automatic fallback if Hugging Face is unreachable. An integrity check runs immediately after load, row count, column names, and treatment/control split ratio are all checked against documented values, and the load **fails loudly** on drift rather than silently continuing.
+Loaded via `datasets.load_dataset("criteo/criteo-uplift")` (Hugging Face), with `sklift.datasets.fetch_criteo(target_col='all', treatment_col='all')` as an automatic fallback if Hugging Face is unreachable. An integrity check runs immediately after load, row count, column names, and treatment/control split ratio are all checked against documented values (85.00% treated in the full dataset), and the load **fails loudly** on drift rather than silently continuing.
 
 ### Why `visit`, not `conversion`
 
-Before any segment-level work begins, a minimum detectable effect (MDE) calculation (`statsmodels.stats.power.NormalIndPower`) checks what effect size each outcome can actually detect at the planned subsample size:
+Before any segment-level work begins, a minimum detectable effect (MDE) calculation (`statsmodels.stats.power.NormalIndPower`) checks what effect size each outcome can actually detect at the planned subsample size (300,000 rows, treated as 150,000 per arm for this planning calculation):
 
-| Outcome | Baseline rate | Relative MDE at n=100k/arm |
+| Outcome | Baseline rate | Relative MDE at n=150k/arm |
 |---|---|---|
-| `visit` | ~4.5% | ~5.9% |
-| `conversion` | ~0.3% | ~24.1% |
+| `visit` | 4.70% | 4.66% |
+| `conversion` | 0.29% | 19.81% |
 
-`conversion`'s rarity means it can't support reliable per-segment estimation at CPU-feasible sample sizes. Consequence: **`visit` is the outcome for Sections 2 and 3.** `conversion` is used only for the full-dataset ground-truth ATE in Section 1, where n is large enough to be meaningful, and is explicitly excluded from segment-level work, this table is why, not an afterthought.
+`conversion`'s rarity means it can't support reliable per-segment estimation at CPU-feasible sample sizes, its MDE is more than 4x `visit`'s. Consequence: **`visit` is the outcome for Sections 2 and 3.** `conversion` is used only for the full-dataset ground-truth ATE in Section 1, where n is large enough to be meaningful, and is explicitly excluded from segment-level work, this table is why, not an afterthought.
 
 ## Pipeline
 
@@ -76,43 +76,53 @@ flowchart TD
 
 - ### Section 1: Validation via self-induced confounding
 
-Ground-truth ATE is computed analytically from the full randomized dataset; bootstrapping ~13.9M rows adds cost without meaningful benefit.
+Ground-truth ATE (full dataset, analytic): **visit = 0.01034** (95% CI [0.01006, 0.01063]); `conversion` = 0.00115, secondary only. Confounding: `retention_probability = sigmoid(g0 + g1·X + g2·X·T)`, `X` chosen by outcome correlation (`f9`, r=0.497 on the 300k subsample). Calibration converged on iteration 1 at `g2 = 0.5`.
 
-Confounding is induced via:
+Bias-severity curve (point estimate, % bias vs ground truth):
 
-```text
-retention_probability = sigmoid(g0 + g1·X + g2·X·T)
-```
+| Severity | Naive OLS | PSM | IPW | AIPW |
+|---|---|---|---|---|
+| none | 0.00945 (-8.6%) | 0.00690 (-33.3%) | 0.00829 (-19.8%) | 0.00767 (-25.8%) |
+| mild | 0.01824 (+76.3%) | 0.00844 (-18.3%) | 0.00926 (-10.4%) | 0.00852 (-17.6%) |
+| moderate | 0.02603 (+151.7%) | 0.00650 (-37.2%) | 0.00988 (-4.5%) | 0.00975 (-5.8%) |
+| strong | 0.03208 (+210.2%) | 0.00663 (-35.9%) | 0.01008 (-2.6%) | 0.01108 (+7.1%) |
 
-`X` is selected for outcome correlation so the interaction can create genuine confounding. A calibration loop increases `g2` until both treatment imbalance and naive-estimate bias are detected, with a capped `max_iters` and explicit `converged: False` on failure.
+Naive OLS bias grows with severity up to +210%; IPW and AIPW stay within ~3-8% of ground truth throughout. PSM sits 18-37% below ground truth at every severity, it matches only 18.0% of treated units 1:1 (22,618 of 125,988), so it's effectively estimating the ATT on the matched subpopulation, not the full-sample ATE. 0 imbalanced covariates remain post-match; 99.98% of rows fall within common support.
 
-Naive OLS, PSM, IPW, and AIPW are compared across four confounding severities, producing a bias-severity curve. Each estimate has a real bootstrap CI. PSM is strict 1:1 without replacement, so the ~85/15 treatment/control split naturally leaves many treated units unmatched; match rate and balance are reported.
+Required n per arm to detect the ground-truth effect at standard power: 7,239, about 40x smaller than the 300,000-row subsample used, so Section 1 is comfortably powered.
 
 - ### Section 1.5: Outcome selection
 
-Before segment-level work begins, an MDE calculation decides whether `visit` or `conversion` can support reliable per-segment estimation at CPU-feasible sample sizes; see [Why `visit`, not `conversion`](#why-visit-not-conversion) for the full table. `visit` is selected for Sections 2 and 3; `conversion` is used only for the Section 1 ground-truth ATE.
+MDE calculation decides `visit` over `conversion` for segment-level work; see the [table above](#why-visit-not-conversion). `conversion` is used only for the Section 1 ground-truth ATE.
 
 - ### Section 2: Heterogeneity
 
-A calibrated **T-learner** estimates CATE; causal forests are future work. A held-out **Qini coefficient** validates uplift ranking against random targeting.
+Calibrated **T-learner** on a clean, non-confounded 500,000-row subsample (297,501 treated / 52,499 control, train split); causal forests are future work. Held-out CATE (150,000 rows): mean 0.00718, std 0.02133. **Qini coefficient: 0.0565**, a modest but positive edge over random targeting.
 
-Users are clustered on pre-treatment covariates, with quantile segmentation as an alternative. Segment treatment effects include bootstrap CIs.
+KMeans segmentation (4 clusters) on pre-treatment covariates:
+
+| Segment | n | Treated | Control | Effect | 95% CI | p-value | Mean predicted CATE |
+|---|---|---|---|---|---|---|---|
+| cluster_0 | 7,259 | 6,247 | 1,012 | 0.0585 | [0.0409, 0.0764] | 1.3e-07 | 0.0375 |
+| cluster_1 | 77,499 | 65,969 | 11,530 | 0.0002 | [-0.0009, 0.0013] | 0.681 | 0.0017 |
+| cluster_2 | 6,192 | 5,260 | 932 | 0.0445 | [0.0150, 0.0755] | 0.0072 | 0.0229 |
+| cluster_3 | 59,050 | 50,024 | 9,026 | 0.0100 | [0.0049, 0.0153] | 0.0005 | 0.0091 |
+
+Clusters 0 and 2 run 4-6x the aggregate ATE; cluster_1, over half the sample, shows essentially no effect.
 
 - ### Section 3: Statistical rigor and Corrections
 
-**Benjamini-Hochberg** correction controls multiple testing across segments. Per-segment power analysis checks whether each segment can detect the claimed effect.
-
-Power is anchored to the Section 1 ground-truth ATE, avoiding circularity. If ground truth is unavailable, the segment-effect median is used as an explicitly illustrative fallback.
+**Benjamini-Hochberg:** 3 of 4 segments significant after correction (cluster_1 drops out). **Power analysis**, anchored to Section 1's ground truth (0.01034) to avoid circularity: 2 of 4 segments underpowered (cluster_0: 0.33, cluster_2: 0.29, vs 0.80 threshold), despite being the most significant segments in the table above. Not a contradiction, their own effects are large enough to clear significance on a small sample, but the power check asks whether that sample size detects the smaller *aggregate* effect, not the segment's own larger one. Falls back to the segment-effect median if ground truth is unavailable.
 
 - ### Section 4: Sensitivity analysis
 
-**Rosenbaum bounds** are applied to the calibrated PSM matched pairs, yielding the critical **Gamma**: the unmeasured-confounding strength needed to overturn the conclusion.
+**Rosenbaum bounds** on the PSM matched pairs (22,618 pairs, 1,390 discordant): critical **Gamma = 1.15**. Close to 1, so the matched-pairs conclusion is fragile, a confounder shifting treatment odds by ~15% would overturn it at alpha=0.05.
 
 - ### Section 5: The one (and only) LLM step
 
-One diagnostic critique uses balance, overlap, and Rosenbaum outputs to flag likely assumption violations in plain language.
+Diagnostic critique over balance, overlap, and Rosenbaum outputs. Reference run: flagged covariates as well-balanced, full common-support overlap, and the Gamma=1.15 result as "quite sensitive to hidden bias."
 
-**Groq** is primary, **NVIDIA NIM** is fallback, and a deterministic rule-based fallback is used if both fail. The LLM is not used for reporting, summarization, the README, Sections 2–3, or anywhere else.
+**Groq** is primary, **NVIDIA NIM** is fallback, and a deterministic rule-based fallback is used if both fail. The LLM is not used for reporting, summarization, the README, Sections 2-3, or anywhere else.
 
 ## Methods
 
@@ -127,15 +137,15 @@ One diagnostic critique uses balance, overlap, and Rosenbaum outputs to flag lik
 
 ## Guardrails
 
-* **Calibration fails loudly:** If the validation gate doesn't pass within `max_iters`, it reports `converged: False` rather than accepting an uncalibrated severity.
-* **Matching is true 1:1:** Controls are removed once matched, preventing reuse and inflated match rates.
+* **Calibration fails loudly:** If the validation gate doesn't pass within `max_iters`, it reports `converged: False` rather than accepting an uncalibrated severity. In the reference run it converged on the first iteration.
+* **Matching is true 1:1:** Controls are removed once matched, preventing reuse and inflated match rates. Reference run: 0 imbalanced covariates remained after matching.
 * **Power analysis flags weak inputs:** If Section 1 hasn't run, the fallback effect size is clearly labeled as less defensible rather than presented as authoritative.
 * **Data integrity is enforced:** Row count, columns, and treatment/control split are validated on load; drift stops the pipeline.
 * **The LLM cannot change results:** It only interprets existing diagnostics. Estimates, p-values, and bounds are untouched, and an unavailable LLM triggers a deterministic fallback.
 
 ## Project Structure
 ```
-causal-impact-lab/
+causal-inference-lab/
 ├── data/                          # local dataset cache + generated artifacts (gitignored)
 ├── assets/                        # dashboard screenshots used in this README
 │
@@ -157,7 +167,7 @@ causal-impact-lab/
 │   │   ├── segmentation.py        # clustering / quantile splits, per-segment effects
 │   │   └── evaluation.py          # Qini coefficient, Benjamini-Hochberg correction
 │   │
-│   ├── sensitivity/               # Section 4
+│   ├── sensitivity/                # Section 4
 │   │   └── rosenbaum.py           # Rosenbaum bounds on PSM matched pairs
 │   │
 │   └── llm_critique/
@@ -194,8 +204,8 @@ causal-impact-lab/
 
 1. **Install**
    ```bash
-   git clone https://github.com/abhinavharbola/causal-impact-lab.git
-   cd causal-impact-lab
+   git clone https://github.com/abhinavharbola/causal-inference-lab.git
+   cd causal-inference-lab
    python -m venv venv && source venv/bin/activate    # venv\Scripts\activate on Windows
    pip install -r requirements.txt
    cp .env.example .env    # then fill in whichever keys you're using, see table below, all optional
@@ -260,11 +270,12 @@ Run the tests with:
 pytest tests/ -v
 ```
 
-32 tests across `test_confounding.py`, `test_estimators.py`, `test_diagnostics.py`, and `test_power_analysis.py`, covering calibration convergence/non-convergence, estimator correctness on known synthetic data, matched-pairs uniqueness (no control row reused across pairs), and MDE/power calculation correctness.
+34 tests across `test_confounding.py` (7), `test_diagnostics.py` (4), `test_estimators.py` (15), and `test_power_analysis.py` (8), covering calibration convergence/non-convergence, estimator correctness on known synthetic data, matched-pairs uniqueness (no control row reused across pairs), and MDE/power calculation correctness.
 
 ## Known limitations
 
-- Matching (Sections 1 & 4) is strict 1:1 without replacement; under this dataset's ~85/15 treated/control split that discards most treated units by design. The reported match rate makes this visible in the dashboard rather than hiding it.
-- `conversion`'s ~0.3% base rate makes it unusable for segment-level work at CPU-feasible sample sizes (see the MDE table above); it's used only for the full-dataset ground-truth ATE.
-- Rosenbaum bounds are defined for matched pairs and are computed only against the PSM estimator; IPW and AIPW have no equivalent sensitivity check in this project.
-- The one LLM step depends on free-tier Groq/NVIDIA NIM availability; if both are unreachable, it falls back to a deterministic rule-based critique that is correct but less nuanced than a live LLM response.
+- Strict 1:1 matching without replacement (Sections 1 & 4) matches only 18.0% of treated units at strong severity. PSM's estimates run 18-37% below ground truth at every severity, it's estimating the ATT on the matched subpopulation, not the full-sample ATE.
+- `conversion`'s ~0.3% base rate gives it a relative MDE over 4x `visit`'s, unusable for segment-level work; used only for the full-dataset ground-truth ATE.
+- Per-segment power is checked against the aggregate ground-truth effect, not each segment's own effect, so a segment can be significant and "underpowered" at once (intentional, avoids circularity, but reads as contradictory without this note).
+- Rosenbaum bounds apply to PSM only, no equivalent check exists for IPW/AIPW. Reference run: critical Gamma = 1.15, a fragile result.
+- The LLM step depends on free-tier Groq/NVIDIA NIM; if both are unreachable it falls back to a deterministic rule-based critique, correct but less nuanced.
