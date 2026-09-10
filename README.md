@@ -9,7 +9,7 @@ Built as a portfolio project on entirely free-tier infrastructure: no paid APIs,
 <p align="center">
   <img src="assets/dashboard.png" width="720" alt="Streamlit dashboard showing the masthead, all six pipeline-stage tabs spanning the full width, and Section 2's Segment-level CATE Breakdown">
   <br>
-  <sub><em>Section 2, Heterogeneity: Third of six pipeline-stage tabs.</em></sub>
+  <sub>Section 2, Heterogeneity: Third of six pipeline-stage tabs.</sub>
 </p>
 
 Additional screenshots (`01_validation`, `01.5_outcome.png`, `02_heterogeneity.png`, `03_rigor.png`, `04_sensitivity.png`, `05_critique.png`) are in [`assets/`](assets/) using that naming convention, one per dashboard tab.
@@ -169,8 +169,8 @@ causal-impact-lab/
 │   └── 03_sensitivity.ipynb       # Section 4
 │
 ├── dashboard/app.py               # Streamlit dashboard (reads db.py + data/processed/ artifacts)
-├── .streamlit/config.toml         # pins the dashboard's light theme so st.dataframe etc.
-│                                   # don't fall back to the viewer's own dark/light setting
+├── .streamlit/config.toml         # dashboard's light theme
+│
 ├── tests/
 │
 ├── .env.example
