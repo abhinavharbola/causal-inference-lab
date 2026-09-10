@@ -1,5 +1,3 @@
-FILE: README.md
-================================================
 # Causal Impact & Heterogeneous Response Analysis
 
 A causal inference pipeline that turns randomized ad-exposure data into two validated answers: overall impact and which audiences actually responded, with each estimator benchmarked against known ground truth and every segment-level result rigorously tested for statistical significance.
