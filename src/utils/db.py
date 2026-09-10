@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
     ci_lower REAL,
     ci_upper REAL,
     balance_stats TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    UNIQUE(method, severity_label)
 )
 """
 
@@ -70,6 +71,14 @@ def _log_run_local(
         INSERT INTO {TABLE_NAME}
         (method, severity_label, g2, config, point_estimate, ci_lower, ci_upper, balance_stats, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(method, severity_label) DO UPDATE SET
+            g2=excluded.g2,
+            config=excluded.config,
+            point_estimate=excluded.point_estimate,
+            ci_lower=excluded.ci_lower,
+            ci_upper=excluded.ci_upper,
+            balance_stats=excluded.balance_stats,
+            created_at=excluded.created_at
         """,
         (
             method,
@@ -132,7 +141,7 @@ def log_estimation_run(
 
     if client is not None:
         try:
-            client.table(TABLE_NAME).insert(
+            client.table(TABLE_NAME).upsert(
                 {
                     "method": method,
                     "severity_label": severity_label,
@@ -143,7 +152,8 @@ def log_estimation_run(
                     "ci_upper": ci_upper,
                     "balance_stats": json.dumps(balance_stats or {}),
                     "created_at": datetime.now(timezone.utc).isoformat(),
-                }
+                },
+                on_conflict="method,severity_label",
             ).execute()
             logger.info("Logged run (%s, %s) to Supabase", method, severity_label)
             return
@@ -152,6 +162,13 @@ def log_estimation_run(
 
     _log_run_local(method, severity_label, g2, config, point_estimate, ci_lower, ci_upper, balance_stats)
     logger.info("Logged run (%s, %s) to local SQLite", method, severity_label)
+
+
+def _dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "created_at" not in df.columns:
+        return df
+    df = df.sort_values("created_at")
+    return df.drop_duplicates(subset=["method", "severity_label"], keep="last").reset_index(drop=True)
 
 
 def fetch_estimation_runs(method: str = None, severity_label: str = None, client=None) -> pd.DataFrame:
@@ -168,8 +185,9 @@ def fetch_estimation_runs(method: str = None, severity_label: str = None, client
             response = query.execute()
             df = pd.DataFrame(response.data)
             logger.info("Fetched %d runs from Supabase", len(df))
-            return df
+            return _dedupe_latest(df)
         except Exception as exc:
             logger.warning("Supabase fetch failed (%s), falling back to local SQLite", exc)
 
-    return _fetch_runs_local(method=method, severity_label=severity_label)
+    df = _fetch_runs_local(method=method, severity_label=severity_label)
+    return _dedupe_latest(df)

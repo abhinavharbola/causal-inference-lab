@@ -216,7 +216,25 @@ causal-impact-lab/
    | `SUPABASE_URL` / `SUPABASE_KEY` | Run logging | Falls back to a local SQLite file at `data/local_runs.db` |
    | `LOGFIRE_TOKEN` | Structured logging | Falls back to plain console logging |
 
-3. **Database**, no setup required by default. Supabase is used automatically if the two variables above are set; otherwise every run logs to a local SQLite file with no configuration needed.
+3. **Database.** No setup required for the local SQLite fallback. If you're using Supabase, the table has to be created manually before running the notebooks, since the app never creates it for you:
+
+   ```sql
+   create table estimation_runs (
+       id bigint generated always as identity primary key,
+       method text not null,
+       severity_label text,
+       g2 real,
+       config text,
+       point_estimate real,
+       ci_lower real,
+       ci_upper real,
+       balance_stats text,
+       created_at text not null,
+       unique (method, severity_label)
+   );
+   ```
+
+   Run this in the Supabase SQL editor before setting `SUPABASE_URL` / `SUPABASE_KEY`. The `unique (method, severity_label)` constraint is required, it's what makes `log_estimation_run`'s upsert overwrite a rerun of the same method/severity instead of duplicating it.
 
 ## Running it
 

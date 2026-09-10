@@ -432,9 +432,10 @@ def inject_custom_css():
             padding: 1.3rem 1.5rem;
             font-family: 'Public Sans', sans-serif;
             line-height: 1.65;
+            text-align: justify;
         }}
         .critique-card ul {{ margin: 0; padding-left: 1.2rem; }}
-        .critique-card li {{ margin-bottom: 0.55rem; }}
+        .critique-card li {{ margin-bottom: 0.55rem; text-align: justify; }}
         .critique-card li:last-child {{ margin-bottom: 0; }}
         </style>
         """,
@@ -645,7 +646,7 @@ st.markdown(
         <div class="masthead-eyebrow">Causal Inference &middot; Validation Report</div>
         <p class="masthead-title">Causal Impact &amp; Heterogeneous Response Analysis</p>
         <div class="masthead-rule"></div>
-        <p class="masthead-sub">Criteo Uplift Modeling Dataset (v2.1) &middot; validation, heterogeneity, and sensitivity analysis</p>
+        <p class="masthead-sub">Validation, heterogeneity, & sensitivity analysis on the Criteo Uplift dataset</p>
     </div>
     """,
     unsafe_allow_html=True,
