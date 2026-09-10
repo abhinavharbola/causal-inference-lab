@@ -1,5 +1,5 @@
 # Data
-datasets>=2.19          # Hugging Face loader for criteo/criteo-uplift
+datasets>=2.19          # Hugging Face loader
 pandas>=2.0
 numpy>=1.24
 scikit-uplift>=0.5.1    # sklift, fallback loader + Qini metrics
