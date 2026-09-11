@@ -12,7 +12,7 @@ Built as a portfolio project on entirely free-tier infrastructure: no paid APIs,
   <sub>Section 2, Heterogeneity: Third of six pipeline-stage tabs.</sub>
 </p>
 
-> Additional screenshots (`01_validation`, `01.5_outcome.png`, `02_heterogeneity.png`, `03_rigor.png`, `04_sensitivity.png`, `05_critique.png`) are in [`assets/`](assets/) using that naming convention, one per dashboard tab.
+> Additional screenshots for other dashboard tabs are in [`assets/`](assets/).
 
 ## What this is
 
