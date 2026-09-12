@@ -12,7 +12,7 @@ Built as a portfolio project on entirely free-tier infrastructure: no paid APIs,
   <sub>Section 2, Heterogeneity: Third of six pipeline-stage tabs.</sub>
 </p>
 
-> Additional screenshots for other dashboard tabs are in [`assets/`](assets/).
+> Additional screenshots in [`assets/`](assets/), one for each dashboard tab.
 
 ## What this is
 
