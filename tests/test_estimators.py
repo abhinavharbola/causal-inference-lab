@@ -5,6 +5,7 @@ import pytest
 from src.validation.estimators import (
     naive_ols_ate,
     fit_propensity_score,
+    fit_propensity_score_cross_fitted,
     apply_common_support_trim,
     get_matched_pairs,
     psm_ate,
@@ -12,6 +13,8 @@ from src.validation.estimators import (
     ipw_ate,
     aipw_ate,
     aipw_scores,
+    aipw_ate_cross_fitted,
+    aipw_scores_cross_fitted,
     run_estimator_comparison,
     run_estimator_comparison_with_ci,
 )
@@ -118,10 +121,10 @@ def test_get_matched_pairs_improves_covariate_balance(rct_data):
 
 def test_all_estimators_recover_approximately_true_ate_on_rct_data(rct_data):
     df, true_ate = rct_data
-    results = run_estimator_comparison(df, "visit", "treatment", ["f0", "f1"])
+    results = run_estimator_comparison(df, "visit", "treatment", ["f0", "f1"], random_state=0)
 
     for method, estimate in results.items():
-        assert estimate == pytest.approx(true_ate, abs=0.01), f"{method} estimate {estimate} too far from {true_ate}"
+        assert estimate == pytest.approx(true_ate, abs=0.005), f"{method} estimate {estimate} too far from {true_ate}"
 
 
 def test_ipw_ate_uses_stabilized_normalization_not_raw_group_count():
@@ -220,6 +223,49 @@ def test_aipw_scores_mean_matches_aipw_ate(rct_data):
     assert scores.mean() == pytest.approx(estimate, abs=1e-9)
 
 
+def test_cross_fitted_propensity_never_predicts_on_its_own_training_fold(rct_data):
+    df, _ = rct_data
+    propensity = fit_propensity_score_cross_fitted(df, "treatment", ["f0", "f1"], n_splits=5, random_state=0)
+
+    assert len(propensity) == len(df)
+    assert propensity.min() >= 1e-3
+    assert propensity.max() <= 1 - 1e-3
+
+
+def test_cross_fitted_propensity_differs_from_in_sample_propensity(rct_data):
+    df, _ = rct_data
+    in_sample = fit_propensity_score(df, "treatment", ["f0", "f1"])
+    cross_fitted = fit_propensity_score_cross_fitted(df, "treatment", ["f0", "f1"], n_splits=5, random_state=0)
+
+    assert not np.allclose(in_sample, cross_fitted)
+
+
+def test_aipw_cross_fitted_scores_mean_matches_aipw_ate_cross_fitted(rct_data):
+    df, _ = rct_data
+
+    scores = aipw_scores_cross_fitted(df, "visit", "treatment", ["f0", "f1"], n_splits=5, random_state=0)
+    estimate = aipw_ate_cross_fitted(df, "visit", "treatment", ["f0", "f1"], n_splits=5, random_state=0)
+
+    assert scores.mean() == pytest.approx(estimate, abs=1e-9)
+
+
+def test_run_estimator_comparison_cross_fit_default_recovers_true_ate(rct_data):
+    df, true_ate = rct_data
+    results = run_estimator_comparison(df, "visit", "treatment", ["f0", "f1"], random_state=0)
+
+    for method, estimate in results.items():
+        assert estimate == pytest.approx(true_ate, abs=0.005), f"{method} estimate {estimate} too far from {true_ate}"
+
+
+def test_run_estimator_comparison_cross_fit_toggle_produces_different_aipw_estimate(rct_data):
+    df, _ = rct_data
+
+    with_cross_fit = run_estimator_comparison(df, "visit", "treatment", ["f0", "f1"], cross_fit=True, random_state=0)
+    without_cross_fit = run_estimator_comparison(df, "visit", "treatment", ["f0", "f1"], cross_fit=False, random_state=0)
+
+    assert with_cross_fit["aipw"] != pytest.approx(without_cross_fit["aipw"], abs=1e-9)
+
+
 def test_run_estimator_comparison_with_ci_produces_valid_intervals(rct_data):
     df, true_ate = rct_data
     results = run_estimator_comparison_with_ci(
@@ -232,4 +278,6 @@ def test_run_estimator_comparison_with_ci_produces_valid_intervals(rct_data):
         # A real CI shouldn't collapse to a single fabricated width formula for
         # every method; at minimum it should have positive width.
         assert r["ci_upper"] > r["ci_lower"], method
+
+
 

@@ -91,6 +91,8 @@ Naive OLS bias grows with severity up to +210%; IPW and AIPW stay within ~3-8% o
 
 Required n per arm to detect the ground-truth effect at standard power: 7,239, about 40x smaller than the 300,000-row subsample used, so Section 1 is comfortably powered.
 
+> **Note:** the bias-severity table above was generated before nuisance-model cross-fitting was added (see Guardrails). PSM, IPW, and AIPW now use cross-fitted propensity scores by default, and AIPW additionally cross-fits its outcome models, which changes their point estimates slightly (cross-fitted PSM in particular tends to land closer to ground truth, since it's no longer matching on an overfit in-sample propensity score). Re-run `01_validation.ipynb` to regenerate this table under the current default (`cross_fit=True`); pass `cross_fit=False` to `run_estimator_comparison` if you need the old in-sample numbers for comparison.
+
 - ### Section 1.5: Outcome selection
 
 MDE calculation decides `visit` over `conversion` for segment-level work; see the [table above](#why-visit-not-conversion). `conversion` is used only for the Section 1 ground-truth ATE.
@@ -109,6 +111,8 @@ KMeans segmentation (4 clusters) on pre-treatment covariates:
 | cluster_3 | 59,050 | 50,024 | 9,026 | 0.0100 | [0.0049, 0.0153] | 0.0005 | 0.0091 |
 
 Clusters 0 and 2 run 4-6x the aggregate ATE; cluster_1, over half the sample, shows essentially no effect.
+
+> **Note:** these clusters are formed on covariate similarity (KMeans), not on predicted CATE directly, so the effect differences above aren't guaranteed by construction to reflect real treatment-effect heterogeneity rather than incidental covariate differences. `segment_cate_separation` (see Guardrails) checks this post hoc via a one-way ANOVA of predicted CATE across clusters; re-run `02_heterogeneity.ipynb` to get the current eta-squared for this clustering.
 
 - ### Section 3: Statistical rigor and Corrections
 
@@ -131,14 +135,17 @@ Diagnostic critique over balance, overlap, and Rosenbaum outputs. Reference run:
 | 1 | Naive OLS | `statsmodels` | Baseline, no confounder adjustment, expected to be the most biased under confounding |
 | 1 | Propensity score matching | `scikit-learn` + `sortedcontainers` | 1:1 without replacement, a real matched-pairs design, not an approximation of one |
 | 1 | IPW | `scikit-learn` (propensity model) | Hajek-normalized inverse probability weighting |
-| 1 | AIPW | `scikit-learn` (propensity + outcome models) | Doubly robust, consistent if either the propensity or the outcome model is correctly specified |
+| 1 | AIPW | `scikit-learn` (propensity + outcome models) | Doubly robust, consistent if either the propensity or the outcome model is correctly specified. Propensity and outcome nuisance models are cross-fitted (`StratifiedKFold`, 5 folds by default): each row's prediction comes from a model trained on the other folds, never on that row itself |
 | 2 | T-learner CATE | `scikit-learn` (calibrated classifiers) | Two per-arm outcome models; their difference gives the estimated CATE |
+| 3 | Segment / CATE separation | `scipy` (`f_oneway`) | One-way ANOVA of predicted CATE across segments (eta-squared), checks whether covariate-based clusters actually track predicted treatment-effect heterogeneity rather than just covariate similarity |
 | 4 | Rosenbaum bounds | `scipy` (`binom`) | Sensitivity of the matched-pairs conclusion to an unmeasured confounder |
 
 ## Guardrails
 
 * **Calibration fails loudly:** If the validation gate doesn't pass within `max_iters`, it reports `converged: False` rather than accepting an uncalibrated severity. In the reference run it converged on the first iteration.
 * **Matching is true 1:1:** Controls are removed once matched, preventing reuse and inflated match rates. Reference run: 0 imbalanced covariates remained after matching.
+* **Nuisance models are cross-fitted, not fit in-sample:** `run_estimator_comparison` and `run_estimator_comparison_with_ci` fit propensity scores and AIPW's outcome models with `StratifiedKFold` cross-fitting by default (`cross_fit=True`, `n_splits=5`). Every row's propensity, mu1, and mu0 prediction comes from a model that never saw that row during training, which is what AIPW's doubly-robust guarantee actually assumes (Chernozhukov et al., 2018). The in-sample functions (`fit_propensity_score`, `aipw_scores`, `aipw_ate`) still exist and are still used directly by the diagnostics module and matching, where cross-fitting isn't the applicable concern, and `cross_fit=False` is available to reproduce the old in-sample numbers.
+* **Segments are checked against predicted CATE, not just covariates:** `cluster_segments` groups users by covariate similarity, which doesn't guarantee those clusters actually differ in predicted treatment effect. `segment_cate_separation` runs a one-way ANOVA of predicted CATE across segments and reports eta-squared (variance in CATE explained by segment membership); `compute_segment_effects` attaches this to `result_df.attrs["cate_separation"]` whenever a `cate` column is present, and logs a warning if segments explain less than 5% of CATE variance, since that means segment-level outcome differences could reflect covariate differences unrelated to treatment response rather than genuine heterogeneity.
 * **Power analysis flags weak inputs:** If Section 1 hasn't run, the fallback effect size is clearly labeled as less defensible rather than presented as authoritative.
 * **Data integrity is enforced:** Row count, columns, and treatment/control split are validated on load; drift stops the pipeline.
 * **The LLM cannot change results:** It only interprets existing diagnostics. Estimates, p-values, and bounds are untouched, and an unavailable LLM triggers a deterministic fallback.
@@ -270,7 +277,7 @@ Run the tests with:
 pytest tests/ -v
 ```
 
-34 tests across `test_confounding.py` (7), `test_diagnostics.py` (4), `test_estimators.py` (15), and `test_power_analysis.py` (8), covering calibration convergence/non-convergence, estimator correctness on known synthetic data, matched-pairs uniqueness (no control row reused across pairs), and MDE/power calculation correctness.
+44 tests across `test_confounding.py` (7), `test_diagnostics.py` (4), `test_estimators.py` (20), `test_power_analysis.py` (8), and `test_segmentation.py` (5), covering calibration convergence/non-convergence, estimator correctness on known synthetic data (including that cross-fitted nuisance predictions differ from in-sample ones and still recover the true ATE), matched-pairs uniqueness (no control row reused across pairs), MDE/power calculation correctness, and CATE/segment separation (eta-squared correctly distinguishes segments with real CATE differences from segments with none).
 
 ## Known limitations
 
@@ -279,3 +286,7 @@ pytest tests/ -v
 - Per-segment power is checked against the aggregate ground-truth effect, not each segment's own effect, so a segment can be significant and "underpowered" at once (intentional, avoids circularity, but reads as contradictory without this note).
 - Rosenbaum bounds apply to PSM only, no equivalent check exists for IPW/AIPW. Reference run: critical Gamma = 1.15, a fragile result.
 - The LLM step depends on free-tier Groq/NVIDIA NIM; if both are unreachable it falls back to a deterministic rule-based critique, correct but less nuanced.
+- The bootstrap CIs in `run_estimator_comparison_with_ci` don't refit the propensity/outcome nuisance models on each bootstrap replicate, the point estimates are computed once (with cross-fitting) and the resulting pair differences / per-row scores are what gets resampled. This is a standard efficiency tradeoff, refitting logistic regression a few hundred times per estimator would be slow, but it understates true variance, since it excludes uncertainty from nuisance-model estimation itself.
+- `cluster_segments`'s KMeans clustering is fit on covariates, not on predicted CATE, so cluster boundaries aren't guaranteed to track treatment-effect heterogeneity by construction. `segment_cate_separation` now checks this after the fact (eta-squared of CATE across segments) rather than the clustering step targeting it directly; a CATE-aware segmentation (e.g. clustering directly on predicted CATE, or a policy tree) would close this gap architecturally instead of just flagging when it's violated.
+
+
