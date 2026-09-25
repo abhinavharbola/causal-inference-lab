@@ -3,6 +3,7 @@ import logging
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sortedcontainers import SortedList
@@ -42,6 +43,28 @@ def fit_propensity_score(
 
     propensity = np.clip(propensity, 1e-3, 1 - 1e-3)
     return propensity
+
+
+def fit_propensity_score_cross_fitted(
+    df: pd.DataFrame,
+    treatment_col: str,
+    covariate_cols: list,
+    n_splits: int = 5,
+    max_iter: int = 5000,
+    random_state: int = None,
+) -> np.ndarray:
+    X = df[covariate_cols].to_numpy()
+    T = df[treatment_col].to_numpy()
+
+    propensity = np.empty(len(df))
+    splitter = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+
+    for train_idx, holdout_idx in splitter.split(X, T):
+        model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=max_iter))
+        model.fit(X[train_idx], T[train_idx])
+        propensity[holdout_idx] = model.predict_proba(X[holdout_idx])[:, 1]
+
+    return np.clip(propensity, 1e-3, 1 - 1e-3)
 
 
 def apply_common_support_trim(
@@ -219,6 +242,68 @@ def aipw_ate(
     return float(scores.mean())
 
 
+def aipw_scores_cross_fitted(
+    df: pd.DataFrame,
+    outcome_col: str,
+    treatment_col: str,
+    covariate_cols: list,
+    n_splits: int = 5,
+    max_iter: int = 5000,
+    random_state: int = None,
+) -> np.ndarray:
+    T = df[treatment_col].to_numpy()
+    Y = df[outcome_col].to_numpy()
+    X = df[covariate_cols].to_numpy()
+    n = len(df)
+
+    e = np.empty(n)
+    mu1 = np.empty(n)
+    mu0 = np.empty(n)
+
+    splitter = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+
+    for train_idx, holdout_idx in splitter.split(X, T):
+        X_train = X[train_idx]
+        T_train = T[train_idx]
+        Y_train = Y[train_idx]
+        X_hold = X[holdout_idx]
+
+        propensity_model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=max_iter))
+        propensity_model.fit(X_train, T_train)
+        e[holdout_idx] = propensity_model.predict_proba(X_hold)[:, 1]
+
+        model_treated = make_pipeline(StandardScaler(), LogisticRegression(max_iter=max_iter))
+        model_treated.fit(X_train[T_train == 1], Y_train[T_train == 1])
+        mu1[holdout_idx] = model_treated.predict_proba(X_hold)[:, 1]
+
+        model_control = make_pipeline(StandardScaler(), LogisticRegression(max_iter=max_iter))
+        model_control.fit(X_train[T_train == 0], Y_train[T_train == 0])
+        mu0[holdout_idx] = model_control.predict_proba(X_hold)[:, 1]
+
+    e = np.clip(e, 1e-3, 1 - 1e-3)
+
+    aipw_treated = mu1 + T * (Y - mu1) / e
+    aipw_control = mu0 + (1 - T) * (Y - mu0) / (1 - e)
+
+    return aipw_treated - aipw_control
+
+
+def aipw_ate_cross_fitted(
+    df: pd.DataFrame,
+    outcome_col: str,
+    treatment_col: str,
+    covariate_cols: list,
+    n_splits: int = 5,
+    max_iter: int = 5000,
+    random_state: int = None,
+) -> float:
+    scores = aipw_scores_cross_fitted(
+        df, outcome_col, treatment_col, covariate_cols,
+        n_splits=n_splits, max_iter=max_iter, random_state=random_state,
+    )
+    return float(scores.mean())
+
+
 def run_estimator_comparison(
     df: pd.DataFrame,
     outcome_col: str,
@@ -226,20 +311,35 @@ def run_estimator_comparison(
     covariate_cols: list,
     caliper: float = 0.2,
     trim_method: str = "overlap",
+    cross_fit: bool = True,
+    n_splits: int = 5,
     random_state: int = None,
 ) -> dict:
-    """Point estimates only (fast). Use `run_estimator_comparison_with_ci` for CIs."""
-    propensity = fit_propensity_score(df, treatment_col, covariate_cols)
+    if cross_fit:
+        propensity = fit_propensity_score_cross_fitted(
+            df, treatment_col, covariate_cols, n_splits=n_splits, random_state=random_state,
+        )
+    else:
+        propensity = fit_propensity_score(df, treatment_col, covariate_cols)
+
     df = df.copy()
     df["_propensity"] = propensity
 
     trimmed = apply_common_support_trim(df, "_propensity", treatment_col, method=trim_method)
 
+    if cross_fit:
+        aipw_estimate = aipw_ate_cross_fitted(
+            trimmed, outcome_col, treatment_col, covariate_cols,
+            n_splits=n_splits, random_state=random_state,
+        )
+    else:
+        aipw_estimate = aipw_ate(trimmed, outcome_col, treatment_col, covariate_cols, "_propensity")
+
     results = {
         "naive_ols": naive_ols_ate(df, outcome_col, treatment_col),
         "psm": psm_ate(trimmed, outcome_col, treatment_col, "_propensity", caliper=caliper, random_state=random_state),
         "ipw": ipw_ate(trimmed, outcome_col, treatment_col, "_propensity"),
-        "aipw": aipw_ate(trimmed, outcome_col, treatment_col, covariate_cols, "_propensity"),
+        "aipw": aipw_estimate,
     }
 
     for method, estimate in results.items():
@@ -257,9 +357,17 @@ def run_estimator_comparison_with_ci(
     trim_method: str = "overlap",
     n_bootstrap: int = 200,
     alpha: float = 0.05,
+    cross_fit: bool = True,
+    n_splits: int = 5,
     random_state: int = None,
 ) -> dict:
-    propensity = fit_propensity_score(df, treatment_col, covariate_cols)
+    if cross_fit:
+        propensity = fit_propensity_score_cross_fitted(
+            df, treatment_col, covariate_cols, n_splits=n_splits, random_state=random_state,
+        )
+    else:
+        propensity = fit_propensity_score(df, treatment_col, covariate_cols)
+
     df = df.copy()
     df["_propensity"] = propensity
     trimmed = apply_common_support_trim(df, "_propensity", treatment_col, method=trim_method)
@@ -288,7 +396,13 @@ def run_estimator_comparison_with_ci(
     )
     results["ipw"] = ipw_boot
 
-    aipw_score_arr = aipw_scores(trimmed, outcome_col, treatment_col, covariate_cols, "_propensity")
+    if cross_fit:
+        aipw_score_arr = aipw_scores_cross_fitted(
+            trimmed, outcome_col, treatment_col, covariate_cols,
+            n_splits=n_splits, random_state=random_state,
+        )
+    else:
+        aipw_score_arr = aipw_scores(trimmed, outcome_col, treatment_col, covariate_cols, "_propensity")
     results["aipw"] = bootstrap_mean_ci(aipw_score_arr, n_bootstrap=n_bootstrap, alpha=alpha, random_state=random_state)
 
     for method, r in results.items():
@@ -305,3 +419,4 @@ def run_estimator_comparison_with_ci(
         }
         for method, r in results.items()
     }
+

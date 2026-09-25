@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 from statsmodels.stats.proportion import proportions_ztest
@@ -9,6 +10,8 @@ from statsmodels.stats.proportion import proportions_ztest
 from src.utils.bootstrap import bootstrap_diff_in_means
 
 logger = logging.getLogger(__name__)
+
+CATE_SEPARATION_THRESHOLD = 0.05
 
 
 def quantile_segments(
@@ -39,6 +42,52 @@ def cluster_segments(
     logger.info("KMeans clustering: %d clusters on %d rows", n_clusters, len(df))
 
     return pd.Series([f"cluster_{i}" for i in labels], index=df.index, name="segment")
+
+
+def segment_cate_separation(
+    df: pd.DataFrame,
+    segment_col: str,
+    cate_col: str = "cate",
+) -> dict:
+    groups = [g[cate_col].to_numpy() for _, g in df.groupby(segment_col, observed=True)]
+
+    if len(groups) < 2:
+        return {
+            "f_statistic": float("nan"),
+            "p_value": float("nan"),
+            "eta_squared": 0.0,
+            "meaningfully_separated": False,
+        }
+
+    f_stat, p_value = stats.f_oneway(*groups)
+
+    grand_mean = df[cate_col].mean()
+    ss_between = sum(len(g) * (g.mean() - grand_mean) ** 2 for g in groups)
+    ss_total = ((df[cate_col] - grand_mean) ** 2).sum()
+    eta_squared = ss_between / ss_total if ss_total > 0 else 0.0
+
+    meaningfully_separated = eta_squared >= CATE_SEPARATION_THRESHOLD
+
+    if meaningfully_separated:
+        logger.info(
+            "Segments explain %.1f%% of CATE variance (eta^2=%.4f, F=%.2f, p=%.2e)",
+            100 * eta_squared, eta_squared, f_stat, p_value,
+        )
+    else:
+        logger.warning(
+            "Segments explain only %.1f%% of CATE variance (eta^2=%.4f, threshold=%.2f). "
+            "Covariate-based clusters may not track predicted treatment-effect heterogeneity, "
+            "segment-level effect differences could instead reflect covariate differences "
+            "unrelated to treatment response.",
+            100 * eta_squared, eta_squared, CATE_SEPARATION_THRESHOLD,
+        )
+
+    return {
+        "f_statistic": float(f_stat),
+        "p_value": float(p_value),
+        "eta_squared": float(eta_squared),
+        "meaningfully_separated": meaningfully_separated,
+    }
 
 
 def compute_segment_effects(
@@ -92,4 +141,10 @@ def compute_segment_effects(
 
     result_df = pd.DataFrame(rows)
     logger.info("Computed segment effects for %d segments", len(result_df))
+
+    if has_cate and len(result_df) >= 2:
+        separation = segment_cate_separation(df, segment_col, cate_col="cate")
+        result_df.attrs["cate_separation"] = separation
+
     return result_df
+
