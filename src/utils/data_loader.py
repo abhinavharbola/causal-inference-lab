@@ -7,15 +7,16 @@ logger = logging.getLogger(__name__)
 EXPECTED_FEATURE_COLUMNS = [f"f{i}" for i in range(12)]
 EXPECTED_COLUMNS = EXPECTED_FEATURE_COLUMNS + ["treatment", "exposure", "conversion", "visit"]
 
-EXPECTED_ROW_COUNT_MIN = 13_000_000
-EXPECTED_ROW_COUNT_MAX = 14_500_000
+EXPECTED_ROW_COUNT = 13_979_592
 
-EXPECTED_TREATMENT_SHARE_MIN = 0.80
-EXPECTED_TREATMENT_SHARE_MAX = 0.90
-EXPECTED_VISIT_RATE_MIN = 0.03
-EXPECTED_VISIT_RATE_MAX = 0.06
-EXPECTED_CONVERSION_RATE_MIN = 0.001
-EXPECTED_CONVERSION_RATE_MAX = 0.006
+EXPECTED_TREATMENT_SHARE = 0.85
+TREATMENT_SHARE_TOLERANCE = 0.005
+
+EXPECTED_VISIT_RATE = 0.0470
+VISIT_RATE_TOLERANCE = 0.001
+
+EXPECTED_CONVERSION_RATE = 0.0029
+CONVERSION_RATE_TOLERANCE = 0.0002
 
 
 class DataIntegrityError(Exception):
@@ -28,48 +29,35 @@ def _check_columns(df: pd.DataFrame) -> None:
     if missing:
         raise DataIntegrityError(f"Missing expected columns: {sorted(missing)}")
     if extra:
-        logger.warning("Unexpected extra columns found: %s", sorted(extra))
+        raise DataIntegrityError(f"Unexpected extra columns: {sorted(extra)}")
 
 
 def _check_row_count(df: pd.DataFrame) -> None:
     n = len(df)
-    if not (EXPECTED_ROW_COUNT_MIN <= n <= EXPECTED_ROW_COUNT_MAX):
-        raise DataIntegrityError(
-            f"Row count {n} outside expected band "
-            f"[{EXPECTED_ROW_COUNT_MIN}, {EXPECTED_ROW_COUNT_MAX}]"
-        )
+    if n != EXPECTED_ROW_COUNT:
+        raise DataIntegrityError(f"Row count {n} does not match documented {EXPECTED_ROW_COUNT}")
     logger.info("Row count check passed: %d rows", n)
+
+
+def _check_within(name: str, value: float, expected: float, tolerance: float) -> None:
+    if abs(value - expected) > tolerance:
+        raise DataIntegrityError(
+            f"{name} {value:.5f} deviates from documented {expected:.5f} by more than {tolerance:.5f}"
+        )
 
 
 def _check_treatment_split(df: pd.DataFrame) -> None:
     share = df["treatment"].mean()
-    if not (EXPECTED_TREATMENT_SHARE_MIN <= share <= EXPECTED_TREATMENT_SHARE_MAX):
-        raise DataIntegrityError(
-            f"Treatment share {share:.4f} outside expected band "
-            f"[{EXPECTED_TREATMENT_SHARE_MIN}, {EXPECTED_TREATMENT_SHARE_MAX}]"
-        )
+    _check_within("Treatment share", share, EXPECTED_TREATMENT_SHARE, TREATMENT_SHARE_TOLERANCE)
     logger.info("Treatment split check passed: %.4f treated", share)
 
 
 def _check_outcome_rates(df: pd.DataFrame) -> None:
     visit_rate = df["visit"].mean()
     conversion_rate = df["conversion"].mean()
-
-    if not (EXPECTED_VISIT_RATE_MIN <= visit_rate <= EXPECTED_VISIT_RATE_MAX):
-        raise DataIntegrityError(
-            f"Visit rate {visit_rate:.4f} outside expected band "
-            f"[{EXPECTED_VISIT_RATE_MIN}, {EXPECTED_VISIT_RATE_MAX}]"
-        )
-    if not (EXPECTED_CONVERSION_RATE_MIN <= conversion_rate <= EXPECTED_CONVERSION_RATE_MAX):
-        raise DataIntegrityError(
-            f"Conversion rate {conversion_rate:.4f} outside expected band "
-            f"[{EXPECTED_CONVERSION_RATE_MIN}, {EXPECTED_CONVERSION_RATE_MAX}]"
-        )
-    logger.info(
-        "Outcome rate check passed: visit=%.4f, conversion=%.4f",
-        visit_rate,
-        conversion_rate,
-    )
+    _check_within("Visit rate", visit_rate, EXPECTED_VISIT_RATE, VISIT_RATE_TOLERANCE)
+    _check_within("Conversion rate", conversion_rate, EXPECTED_CONVERSION_RATE, CONVERSION_RATE_TOLERANCE)
+    logger.info("Outcome rate check passed: visit=%.4f, conversion=%.4f", visit_rate, conversion_rate)
 
 
 def run_integrity_check(df: pd.DataFrame) -> None:

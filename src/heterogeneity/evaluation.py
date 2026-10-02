@@ -1,5 +1,6 @@
 import logging
 
+import numpy as np
 import pandas as pd
 from sklift.metrics import qini_auc_score, qini_curve
 from statsmodels.stats.multitest import multipletests
@@ -12,6 +13,9 @@ def evaluate_cate_qini(
     cate_col: str,
     outcome_col: str,
     treatment_col: str,
+    n_bootstrap: int = 200,
+    alpha: float = 0.05,
+    random_state: int = None,
 ) -> dict:
     y_true = holdout_df[outcome_col].to_numpy()
     uplift = holdout_df[cate_col].to_numpy()
@@ -20,10 +24,31 @@ def evaluate_cate_qini(
     qini_coefficient = qini_auc_score(y_true=y_true, uplift=uplift, treatment=treatment)
     curve_x, curve_y = qini_curve(y_true=y_true, uplift=uplift, treatment=treatment)
 
-    logger.info("Qini coefficient: %.5f", qini_coefficient)
+    ci_lower = float("nan")
+    ci_upper = float("nan")
+
+    if n_bootstrap > 0:
+        rng = np.random.default_rng(random_state)
+        n = len(holdout_df)
+        boot = []
+        for _ in range(n_bootstrap):
+            idx = rng.integers(0, n, size=n)
+            try:
+                boot.append(qini_auc_score(y_true=y_true[idx], uplift=uplift[idx], treatment=treatment[idx]))
+            except Exception as exc:
+                logger.warning("Qini bootstrap iteration failed (%s), skipping", exc)
+
+        if boot:
+            ci_lower = float(np.percentile(boot, 100 * alpha / 2))
+            ci_upper = float(np.percentile(boot, 100 * (1 - alpha / 2)))
+
+    logger.info("Qini coefficient: %.5f [%.5f, %.5f]", qini_coefficient, ci_lower, ci_upper)
 
     return {
         "qini_coefficient": qini_coefficient,
+        "ci_lower": ci_lower,
+        "ci_upper": ci_upper,
+        "n_bootstrap": n_bootstrap,
         "curve_x": curve_x,
         "curve_y": curve_y,
     }
@@ -58,6 +83,7 @@ def apply_benjamini_hochberg(
     reject, p_adjusted, _, _ = multipletests(p_values, alpha=alpha, method="fdr_bh")
 
     result_df = segment_effects_df.copy()
+    result_df.attrs = dict(segment_effects_df.attrs)
     result_df["p_value_adjusted"] = p_adjusted
     result_df["significant_after_correction"] = reject
 

@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
@@ -40,7 +41,6 @@ def fit_t_learner(
         model_treated = CalibratedClassifierCV(base_estimator, cv=cv, method=calibration_method)
         model_control = CalibratedClassifierCV(base_estimator, cv=cv, method=calibration_method)
     else:
-        from sklearn.base import clone
         model_treated = clone(base_estimator)
         model_control = clone(base_estimator)
 

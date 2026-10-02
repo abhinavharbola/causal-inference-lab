@@ -3,8 +3,12 @@ import logging
 import numpy as np
 import pandas as pd
 from scipy import stats
+from scipy.optimize import brentq
 
 logger = logging.getLogger(__name__)
+
+FRAGILE_GAMMA = 1.5
+ROBUST_GAMMA = 3.0
 
 
 def _split_pairs(matched_df: pd.DataFrame, outcome_col: str, treatment_col: str, pair_id_col: str = "_pair_id"):
@@ -46,14 +50,13 @@ def rosenbaum_bound_at_gamma(n_plus: int, n_discordant: int, gamma: float, alter
     p_worst = gamma / (1 + gamma)
 
     if alternative == "greater":
-        # P(X >= n_plus) under Binomial(n_discordant, p_worst)
         p_value = stats.binom.sf(n_plus - 1, n_discordant, p_worst)
     elif alternative == "less":
         p_value = stats.binom.cdf(n_plus, n_discordant, 1 - p_worst)
     else:
         raise ValueError(f"Unknown alternative: {alternative}")
 
-    return p_value
+    return float(p_value)
 
 
 def compute_rosenbaum_bounds(
@@ -92,24 +95,24 @@ def find_critical_gamma(
     pair_id_col: str = "_pair_id",
     alpha: float = 0.05,
     gamma_max: float = 10.0,
-    gamma_step: float = 0.05,
     alternative: str = "greater",
 ) -> dict:
     counts = count_discordant_pairs(matched_df, outcome_col, treatment_col, pair_id_col)
     n_plus = counts["n_plus"]
     n_discordant = counts["n_discordant"]
 
-    gamma = 1.0
+    def excess(gamma: float) -> float:
+        return rosenbaum_bound_at_gamma(n_plus, n_discordant, gamma, alternative) - alpha
+
+    significant_at_gamma_1 = excess(1.0) < 0
     critical_gamma = None
 
-    while gamma <= gamma_max:
-        p_value = rosenbaum_bound_at_gamma(n_plus, n_discordant, gamma, alternative)
-        if p_value >= alpha:
-            critical_gamma = gamma
-            break
-        gamma += gamma_step
-
-    if critical_gamma is None:
+    if not significant_at_gamma_1:
+        logger.warning(
+            "Result is not significant at Gamma=1 (alpha=%.3f); no sensitivity conclusion applies",
+            alpha,
+        )
+    elif excess(gamma_max) < 0:
         logger.info(
             "Conclusion robust to unmeasured confounding up to gamma_max=%.2f "
             "(worst-case p-value never crossed alpha=%.3f in this range)",
@@ -117,14 +120,16 @@ def find_critical_gamma(
             alpha,
         )
     else:
+        critical_gamma = float(brentq(excess, 1.0, gamma_max))
         logger.info(
-            "Critical gamma = %.2f: unmeasured confounding of this odds-ratio strength "
+            "Critical gamma = %.3f: unmeasured confounding of this odds-ratio strength "
             "would be needed to overturn the conclusion at alpha=%.3f",
             critical_gamma,
             alpha,
         )
 
     return {
+        "significant_at_gamma_1": bool(significant_at_gamma_1),
         "critical_gamma": critical_gamma,
         "gamma_max_checked": gamma_max,
         "alpha": alpha,
@@ -133,6 +138,17 @@ def find_critical_gamma(
         "n_plus": n_plus,
         "n_minus": counts["n_minus"],
     }
+
+
+def classify_gamma(critical_result: dict) -> str:
+    if not critical_result["significant_at_gamma_1"]:
+        return "not_significant"
+    critical = critical_result["critical_gamma"]
+    if critical is None or critical >= ROBUST_GAMMA:
+        return "robust"
+    if critical < FRAGILE_GAMMA:
+        return "fragile"
+    return "moderate"
 
 
 def plot_rosenbaum_bounds(bounds_df: pd.DataFrame, alpha: float = 0.05, title: str = "Rosenbaum Sensitivity Bounds"):

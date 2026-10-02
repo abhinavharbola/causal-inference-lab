@@ -3,18 +3,24 @@ import os
 
 import pandas as pd
 
+from src.sensitivity.rosenbaum import classify_gamma
+from src.validation.diagnostics import OVERLAP_COEFFICIENT_WARN
+
 logger = logging.getLogger(__name__)
 
 CRITIQUE_SYSTEM_PROMPT = """You are a methodology reviewer producing a short, plain-language \
 critique for a non-technical stakeholder reading a causal inference analysis. You are given \
-covariate balance diagnostics, common-support overlap statistics, and a Rosenbaum sensitivity \
+covariate balance diagnostics, propensity overlap statistics, and a Rosenbaum sensitivity \
 bound. Your only job is to flag likely assumption violations in 3-5 short bullet points, in \
-plain language, with no jargon left unexplained. Do not summarize the whole analysis, do not \
+plain language, with no jargon left unexplained. Gamma is an odds ratio describing how much \
+more likely one of two matched units could be to receive treatment because of an unmeasured \
+factor; never convert it into a percentage. Do not summarize the whole analysis, do not \
 write a report, do not add caveats beyond what the numbers given to you support. If the \
 diagnostics look clean, say so plainly instead of inventing a concern."""
 
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 DEFAULT_NIM_MODEL = "mistralai/mistral-nemotron"
+MAX_COMPLETION_TOKENS = 2000
 
 
 def format_diagnostics_summary(diagnostics: dict, rosenbaum_result: dict) -> str:
@@ -33,11 +39,16 @@ def format_diagnostics_summary(diagnostics: dict, rosenbaum_result: dict) -> str
 
     overlap_region = overlap["overlap_region"]
     overlap_text = (
-        f"  - {overlap['pct_within_overlap']:.1f}% of matched units within common support region "
-        f"({float(overlap_region[0]):.4f}, {float(overlap_region[1]):.4f})"
+        f"  - {overlap['pct_within_overlap']:.1f}% of the candidate pool lies within the propensity range "
+        f"shared by both arms ({float(overlap_region[0]):.4f}, {float(overlap_region[1]):.4f}); "
+        "this range check is lenient by construction\n"
+        f"  - Overlap coefficient between treated and control propensity distributions: "
+        f"{overlap['overlap_coefficient']:.3f} (1.0 = identical, 0.0 = disjoint)"
     )
 
-    if critical["critical_gamma"] is None:
+    if not critical["significant_at_gamma_1"]:
+        gamma_text = "  - The matched-pair result is not statistically significant even with no unmeasured confounding"
+    elif critical["critical_gamma"] is None:
         gamma_text = (
             f"  - Conclusion holds even at Gamma up to {critical['gamma_max_checked']} "
             f"(no unmeasured confounding of that strength or less could overturn it)"
@@ -45,17 +56,28 @@ def format_diagnostics_summary(diagnostics: dict, rosenbaum_result: dict) -> str
     else:
         gamma_text = (
             f"  - Conclusion could be overturned by unmeasured confounding at Gamma >= "
-            f"{critical['critical_gamma']:.2f} (odds-ratio strength)"
+            f"{critical['critical_gamma']:.2f} (odds-ratio strength), based on "
+            f"{critical['n_discordant']} discordant pairs"
         )
 
     return (
         "Covariate balance (standardized mean difference, |SMD| > 0.1 = imbalanced):\n"
         f"{balance_text}\n\n"
-        "Common support overlap:\n"
+        "Propensity overlap:\n"
         f"{overlap_text}\n\n"
         "Rosenbaum sensitivity bound:\n"
         f"{gamma_text}"
     )
+
+
+def _extract_text(response) -> str:
+    choice = response.choices[0]
+    if getattr(choice, "finish_reason", None) == "length":
+        raise RuntimeError("Completion truncated at the token limit")
+    text = choice.message.content
+    if not text or not text.strip():
+        raise RuntimeError("Completion returned no text")
+    return text
 
 
 def _call_groq(prompt: str, model: str, api_key: str) -> str:
@@ -69,9 +91,9 @@ def _call_groq(prompt: str, model: str, api_key: str) -> str:
             {"role": "user", "content": prompt},
         ],
         temperature=0.2,
-        max_tokens=400,
+        max_tokens=MAX_COMPLETION_TOKENS,
     )
-    return response.choices[0].message.content
+    return _extract_text(response)
 
 
 def _call_nim(prompt: str, model: str, api_key: str) -> str:
@@ -85,9 +107,9 @@ def _call_nim(prompt: str, model: str, api_key: str) -> str:
             {"role": "user", "content": prompt},
         ],
         temperature=0.2,
-        max_tokens=400,
+        max_tokens=MAX_COMPLETION_TOKENS,
     )
-    return response.choices[0].message.content
+    return _extract_text(response)
 
 
 def _rule_based_fallback(diagnostics: dict, rosenbaum_result: dict) -> str:
@@ -104,28 +126,40 @@ def _rule_based_fallback(diagnostics: dict, rosenbaum_result: dict) -> str:
     else:
         flags.append("- Covariate balance looks good on all checked covariates after matching.")
 
-    if overlap["pct_within_overlap"] < 90:
+    coefficient = overlap["overlap_coefficient"]
+    if coefficient < OVERLAP_COEFFICIENT_WARN:
         flags.append(
-            f"- Only {overlap['pct_within_overlap']:.1f}% of units fall within common support; "
-            "a meaningful share of the sample was dropped to enforce overlap."
+            f"- Treated and control propensity distributions overlap weakly "
+            f"(overlap coefficient {coefficient:.2f}); estimates rely on extrapolation."
         )
     else:
-        flags.append(f"- Common support overlap is strong ({overlap['pct_within_overlap']:.1f}% retained).")
+        flags.append(f"- Treated and control propensity distributions overlap reasonably (coefficient {coefficient:.2f}).")
 
-    if critical["critical_gamma"] is not None and critical["critical_gamma"] < 2.0:
+    status = classify_gamma(critical)
+    if status == "not_significant":
+        flags.append(
+            "- The matched-pair result is not statistically significant even under the no-confounding assumption, "
+            "so a sensitivity bound adds nothing."
+        )
+    elif status == "fragile":
         flags.append(
             f"- The result is sensitive to unmeasured confounding: an unobserved factor with only "
             f"Gamma={critical['critical_gamma']:.2f} strength could overturn the conclusion."
         )
-    elif critical["critical_gamma"] is not None:
+    elif status == "moderate":
         flags.append(
             f"- The result is moderately robust to unmeasured confounding (critical Gamma="
             f"{critical['critical_gamma']:.2f})."
         )
-    else:
+    elif critical["critical_gamma"] is None:
         flags.append(
             f"- The result is robust to unmeasured confounding up to Gamma="
             f"{critical['gamma_max_checked']}, the strongest level checked."
+        )
+    else:
+        flags.append(
+            f"- The result is robust to unmeasured confounding (critical Gamma="
+            f"{critical['critical_gamma']:.2f})."
         )
 
     return "\n".join(flags)
@@ -166,6 +200,6 @@ def run_diagnostic_critique(
         except Exception as exc:
             logger.warning("Critique via %s failed (%s), trying next option", p, exc)
 
-    logger.warning("No LLM provider reachable, falling back to rule-based critique")
+    logger.warning("No LLM provider produced a critique, falling back to rule-based critique")
     fallback_text = _rule_based_fallback(diagnostics, rosenbaum_result)
     return {"critique_text": fallback_text, "source": "rule_based_fallback", "prompt_used": prompt}

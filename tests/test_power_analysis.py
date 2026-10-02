@@ -4,79 +4,97 @@ import pytest
 from src.utils.power_analysis import (
     calculate_mde,
     mde_comparison_table,
-    required_sample_size,
     power_curve,
+    required_sample_size,
     segment_power_analysis,
 )
 
 
-def test_calculate_mde_returns_smaller_effect_for_larger_n():
-    small_n = calculate_mde("visit", baseline_rate=0.045, n_per_group=10_000)
-    large_n = calculate_mde("visit", baseline_rate=0.045, n_per_group=200_000)
+def test_calculate_mde_shrinks_as_sample_size_grows():
+    small = calculate_mde("visit", 0.038, 10_000)
+    large = calculate_mde("visit", 0.038, 100_000)
 
-    assert large_n.mde_absolute < small_n.mde_absolute
-
-
-def test_conversion_requires_larger_relative_effect_than_visit_at_same_n():
-    visit_result = calculate_mde("visit", baseline_rate=0.045, n_per_group=100_000)
-    conversion_result = calculate_mde("conversion", baseline_rate=0.003, n_per_group=100_000)
-
-    assert conversion_result.mde_relative > visit_result.mde_relative
+    assert large.mde_absolute < small.mde_absolute
 
 
-def test_mde_comparison_table_has_expected_columns_and_row_count():
-    table = mde_comparison_table({"visit": 0.045, "conversion": 0.003}, n_per_group=50_000)
+def test_calculate_mde_relative_is_larger_for_rarer_outcomes():
+    visit = calculate_mde("visit", 0.038, 50_000)
+    conversion = calculate_mde("conversion", 0.002, 50_000)
 
-    assert len(table) == 2
-    assert set(table["outcome"]) == {"visit", "conversion"}
-    for col in ["baseline_rate", "n_per_group", "mde_absolute", "mde_relative_pct"]:
-        assert col in table.columns
+    assert conversion.mde_relative > visit.mde_relative
 
 
-def test_required_sample_size_is_consistent_with_calculate_mde():
-    baseline_rate = 0.045
-    true_effect = 0.005
+def test_calculate_mde_matches_known_reference_value():
+    result = calculate_mde("visit", 0.046992, 150_000)
 
-    required_n = required_sample_size(baseline_rate, true_effect)
-    mde_at_required_n = calculate_mde("visit", baseline_rate, n_per_group=required_n)
+    assert result.mde_absolute == pytest.approx(0.002189, abs=2e-5)
+    assert result.mde_relative * 100 == pytest.approx(4.66, abs=0.05)
 
-    assert mde_at_required_n.mde_absolute == pytest.approx(true_effect, rel=0.05)
+
+def test_calculate_mde_imbalanced_arms_are_more_sensitive_than_equal_control_only():
+    balanced = calculate_mde("visit", 0.038, 20_000, ratio=1.0)
+    imbalanced = calculate_mde("visit", 0.038, 20_000, ratio=5.0)
+
+    assert imbalanced.mde_absolute < balanced.mde_absolute
+
+
+def test_calculate_mde_imbalanced_arms_are_less_sensitive_than_equal_total_size():
+    n_total = 150_000
+    equal = calculate_mde("visit", 0.038, n_total // 2, ratio=1.0)
+    n_control = int(n_total * 0.15)
+    skewed = calculate_mde("visit", 0.038, n_control, ratio=(n_total - n_control) / n_control)
+
+    assert skewed.mde_absolute > equal.mde_absolute
+
+
+def test_mde_comparison_table_has_one_row_per_outcome_and_records_ratio():
+    table = mde_comparison_table({"visit": 0.038, "conversion": 0.002}, 22_500, ratio=5.67)
+
+    assert list(table["outcome"]) == ["visit", "conversion"]
+    assert (table["ratio"] == 5.67).all()
+    assert (table["mde_absolute"] > 0).all()
+
+
+def test_required_sample_size_decreases_for_larger_effects():
+    small_effect = required_sample_size(0.038, 0.005)
+    large_effect = required_sample_size(0.038, 0.02)
+
+    assert large_effect < small_effect
+
+
+def test_required_sample_size_is_smaller_per_control_unit_with_more_treated_units():
+    balanced = required_sample_size(0.038, 0.01, ratio=1.0)
+    skewed = required_sample_size(0.038, 0.01, ratio=5.0)
+
+    assert skewed < balanced
 
 
 def test_power_curve_is_monotonically_increasing_in_n():
-    n_range = np.array([1_000, 5_000, 20_000, 100_000])
-    curve = power_curve(baseline_rate=0.045, true_effect_absolute=0.005, n_range=n_range)
+    curve = power_curve(0.038, 0.01, np.array([1_000, 5_000, 20_000, 100_000]))
 
-    powers = curve["power"].to_numpy()
-    assert np.all(np.diff(powers) >= 0)
-    assert powers[-1] > powers[0]
+    assert curve["power"].is_monotonic_increasing
 
 
 def test_segment_power_analysis_flags_small_segments_as_underpowered():
-    segments = {"large": 200_000, "tiny": 500}
-    result = segment_power_analysis(
-        segments, baseline_rate=0.045, true_effect_absolute=0.003, treatment_share=0.85
-    )
+    arms = {"big": (85_000, 15_000), "tiny": (85, 15)}
+    table = segment_power_analysis(arms, baseline_rate=0.038, true_effect_absolute=0.01).set_index("segment")
 
-    tiny_row = result[result["segment"] == "tiny"].iloc[0]
-    large_row = result[result["segment"] == "large"].iloc[0]
-
-    assert tiny_row["underpowered"]
-    assert tiny_row["achieved_power"] < large_row["achieved_power"]
+    assert not table.loc["big", "underpowered"]
+    assert table.loc["tiny", "underpowered"]
+    assert table.loc["big", "achieved_power"] > table.loc["tiny", "achieved_power"]
 
 
-def test_segment_power_analysis_respects_treatment_share():
-    segments = {"seg": 100_000}
+def test_segment_power_analysis_uses_the_observed_arm_sizes():
+    arms = {"even": (5_000, 5_000), "skewed": (9_000, 1_000)}
+    table = segment_power_analysis(arms, baseline_rate=0.038, true_effect_absolute=0.01).set_index("segment")
 
-    balanced = segment_power_analysis(segments, baseline_rate=0.045, true_effect_absolute=0.005, treatment_share=0.5)
-    imbalanced = segment_power_analysis(segments, baseline_rate=0.045, true_effect_absolute=0.005, treatment_share=0.85)
+    assert table.loc["even", "n_control"] == 5_000
+    assert table.loc["skewed", "n_treatment"] == 9_000
+    assert table.loc["even", "achieved_power"] > table.loc["skewed", "achieved_power"]
 
-    assert imbalanced.iloc[0]["achieved_power"] < balanced.iloc[0]["achieved_power"]
 
+def test_segment_power_analysis_handles_an_empty_arm_without_raising():
+    table = segment_power_analysis({"empty": (100, 0)}, baseline_rate=0.038, true_effect_absolute=0.01)
 
-def test_segment_power_analysis_handles_zero_arm_segment_gracefully():
-    segments = {"empty_control_risk": 1}
-    result = segment_power_analysis(segments, baseline_rate=0.045, true_effect_absolute=0.005, treatment_share=0.99)
-
-    assert result.iloc[0]["underpowered"]
-    assert result.iloc[0]["achieved_power"] == 0.0
+    assert table.loc[0, "underpowered"]
+    assert table.loc[0, "achieved_power"] == 0.0

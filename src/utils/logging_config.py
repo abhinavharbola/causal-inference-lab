@@ -3,12 +3,18 @@ import os
 
 _CONSOLE_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
+_configured_result = None
+
 
 def configure_logging(
     service_name: str = "causal-uplift-project",
     level: int = logging.INFO,
     logfire_token: str = None,
 ) -> bool:
+    global _configured_result
+    if _configured_result is not None:
+        return _configured_result
+
     logfire_token = logfire_token or os.environ.get("LOGFIRE_TOKEN")
 
     if logfire_token:
@@ -22,6 +28,7 @@ def configure_logging(
             root_logger.addHandler(logfire.LogfireLoggingHandler())
 
             logging.getLogger(__name__).info("Structured logging configured via Logfire")
+            _configured_result = True
             return True
 
         except Exception as exc:
@@ -29,19 +36,10 @@ def configure_logging(
             logging.getLogger(__name__).warning(
                 "Logfire configuration failed (%s), falling back to console logging", exc
             )
+            _configured_result = False
             return False
 
     logging.basicConfig(level=level, format=_CONSOLE_FORMAT)
-    logging.getLogger(__name__).info(
-        "LOGFIRE_TOKEN not set, using console logging fallback"
-    )
+    logging.getLogger(__name__).info("LOGFIRE_TOKEN not set, using console logging fallback")
+    _configured_result = False
     return False
-
-
-def get_span(name: str, **attributes):
-    try:
-        import logfire
-        return logfire.span(name, **attributes)
-    except Exception:
-        from contextlib import nullcontext
-        return nullcontext()

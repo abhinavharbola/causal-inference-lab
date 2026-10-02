@@ -17,11 +17,12 @@ class MDEResult:
     outcome_name: str
     baseline_rate: float
     n_per_group: int
+    ratio: float
     alpha: float
     power: float
-    effect_size_h: float          # Cohen's h, standardized effect size
-    mde_absolute: float           # minimum detectable absolute rate difference
-    mde_relative: float           # mde_absolute / baseline_rate
+    effect_size_h: float
+    mde_absolute: float
+    mde_relative: float
 
 
 def _effect_size_to_absolute_mde(baseline_rate: float, effect_size_h: float) -> float:
@@ -37,13 +38,14 @@ def calculate_mde(
     n_per_group: int,
     alpha: float = 0.05,
     power: float = 0.8,
+    ratio: float = 1.0,
 ) -> MDEResult:
     effect_size_h = _power_calc.solve_power(
         effect_size=None,
         nobs1=n_per_group,
         alpha=alpha,
         power=power,
-        ratio=1.0,
+        ratio=ratio,
         alternative="two-sided",
     )
 
@@ -54,6 +56,7 @@ def calculate_mde(
         outcome_name=outcome_name,
         baseline_rate=baseline_rate,
         n_per_group=n_per_group,
+        ratio=ratio,
         alpha=alpha,
         power=power,
         effect_size_h=effect_size_h,
@@ -67,15 +70,17 @@ def mde_comparison_table(
     n_per_group: int,
     alpha: float = 0.05,
     power: float = 0.8,
+    ratio: float = 1.0,
 ) -> pd.DataFrame:
     rows = []
     for outcome_name, baseline_rate in baseline_rates.items():
-        result = calculate_mde(outcome_name, baseline_rate, n_per_group, alpha, power)
+        result = calculate_mde(outcome_name, baseline_rate, n_per_group, alpha, power, ratio)
         rows.append(
             {
                 "outcome": result.outcome_name,
                 "baseline_rate": result.baseline_rate,
                 "n_per_group": result.n_per_group,
+                "ratio": result.ratio,
                 "alpha": result.alpha,
                 "power": result.power,
                 "mde_absolute": result.mde_absolute,
@@ -83,11 +88,12 @@ def mde_comparison_table(
             }
         )
         logger.info(
-            "MDE for %s: absolute=%.5f, relative=%.2f%% at n=%d",
+            "MDE for %s: absolute=%.5f, relative=%.2f%% at n_control=%d, ratio=%.2f",
             outcome_name,
             result.mde_absolute,
             result.mde_relative * 100,
             n_per_group,
+            ratio,
         )
     return pd.DataFrame(rows)
 
@@ -97,6 +103,7 @@ def required_sample_size(
     true_effect_absolute: float,
     alpha: float = 0.05,
     power: float = 0.8,
+    ratio: float = 1.0,
 ) -> int:
     p1 = baseline_rate
     p2 = baseline_rate + true_effect_absolute
@@ -107,7 +114,7 @@ def required_sample_size(
         nobs1=None,
         alpha=alpha,
         power=power,
-        ratio=1.0,
+        ratio=ratio,
         alternative="two-sided",
     )
     return int(math.ceil(n))
@@ -118,6 +125,7 @@ def power_curve(
     true_effect_absolute: float,
     n_range: np.ndarray,
     alpha: float = 0.05,
+    ratio: float = 1.0,
 ) -> pd.DataFrame:
     p1 = baseline_rate
     p2 = baseline_rate + true_effect_absolute
@@ -130,7 +138,7 @@ def power_curve(
             nobs1=int(n),
             alpha=alpha,
             power=None,
-            ratio=1.0,
+            ratio=ratio,
             alternative="two-sided",
         )
         powers.append(achieved_power)
@@ -139,10 +147,9 @@ def power_curve(
 
 
 def segment_power_analysis(
-    segment_sizes: dict,
+    segment_arms: dict,
     baseline_rate: float,
     true_effect_absolute: float,
-    treatment_share: float = 0.85,
     alpha: float = 0.05,
     power_threshold: float = 0.8,
 ) -> pd.DataFrame:
@@ -151,9 +158,10 @@ def segment_power_analysis(
     effect_size_h = proportion_effectsize(p1, p2)
 
     rows = []
-    for segment_name, n_segment in segment_sizes.items():
-        n_treatment = int(round(n_segment * treatment_share))
-        n_control = n_segment - n_treatment
+    for segment_name, (n_treatment, n_control) in segment_arms.items():
+        n_treatment = int(n_treatment)
+        n_control = int(n_control)
+        n_segment = n_treatment + n_control
 
         if n_control <= 0 or n_treatment <= 0:
             logger.warning(
@@ -207,13 +215,3 @@ def segment_power_analysis(
             true_effect_absolute,
         )
     return df
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-
-    baseline_rates = {"visit": 0.045, "conversion": 0.003}
-    planned_n_per_group = 100_000
-
-    table = mde_comparison_table(baseline_rates, planned_n_per_group)
-    print(table)

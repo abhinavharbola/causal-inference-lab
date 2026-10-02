@@ -94,6 +94,8 @@ def bootstrap_ci(
 
     valid_estimates = boot_estimates[~np.isnan(boot_estimates)]
     n_failed = n_bootstrap - len(valid_estimates)
+    if len(valid_estimates) == 0:
+        raise RuntimeError("Every bootstrap iteration failed; cannot form a confidence interval")
     if n_failed > 0:
         logger.warning("%d of %d bootstrap iterations failed and were dropped", n_failed, n_bootstrap)
 

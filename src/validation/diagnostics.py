@@ -8,6 +8,7 @@ from src.validation.estimators import apply_common_support_trim, get_matched_pai
 logger = logging.getLogger(__name__)
 
 SMD_IMBALANCE_THRESHOLD = 0.1
+OVERLAP_COEFFICIENT_WARN = 0.6
 
 
 def compute_smd(
@@ -92,6 +93,21 @@ def love_plot(balance_df: pd.DataFrame, title: str = "Covariate Balance"):
     return fig
 
 
+def overlap_coefficient(treated_ps: np.ndarray, control_ps: np.ndarray, n_bins: int = 50) -> float:
+    lower = min(treated_ps.min(), control_ps.min())
+    upper = max(treated_ps.max(), control_ps.max())
+    if upper <= lower:
+        return 1.0
+
+    bins = np.linspace(lower, upper, n_bins + 1)
+    hist_t, _ = np.histogram(treated_ps, bins=bins)
+    hist_c, _ = np.histogram(control_ps, bins=bins)
+    hist_t = hist_t / hist_t.sum()
+    hist_c = hist_c / hist_c.sum()
+
+    return float(np.minimum(hist_t, hist_c).sum())
+
+
 def overlap_diagnostics(
     df: pd.DataFrame,
     propensity_col: str,
@@ -106,6 +122,8 @@ def overlap_diagnostics(
     trimmed_overlap = apply_common_support_trim(df, propensity_col, treatment_col, method="overlap")
     trimmed_fixed = apply_common_support_trim(df, propensity_col, treatment_col, method="fixed")
 
+    coefficient = overlap_coefficient(treated_ps.to_numpy(), control_ps.to_numpy())
+
     result = {
         "treated_ps_range": (treated_ps.min(), treated_ps.max()),
         "control_ps_range": (control_ps.min(), control_ps.max()),
@@ -115,13 +133,15 @@ def overlap_diagnostics(
         "pct_within_overlap": 100 * len(trimmed_overlap) / len(df),
         "n_within_fixed_band": len(trimmed_fixed),
         "pct_within_fixed_band": 100 * len(trimmed_fixed) / len(df),
+        "overlap_coefficient": coefficient,
     }
 
     logger.info(
-        "Overlap diagnostics: %.1f%% of rows within overlap region [%.4f, %.4f]",
+        "Overlap diagnostics: %.1f%% of rows within range [%.4f, %.4f], overlap coefficient %.3f",
         result["pct_within_overlap"],
         overlap_lower,
         overlap_upper,
+        coefficient,
     )
 
     return result
@@ -133,34 +153,20 @@ def run_full_diagnostics(
     treatment_col: str,
     propensity_col: str,
     caliper: float = 0.2,
+    trim_method: str = "overlap",
     random_state: int = None,
 ) -> dict:
-    # Row identity, not covariate values, is what "each control used once" needs
-    # to check. Criteo's anonymized f0-f11 columns are bucketed, so distinct
-    # control rows routinely share identical covariate values; deduplicating on
-    # covariate_cols would undercount n_control_unique and could flag correct
-    # 1:1-without-replacement matching as broken. A synthetic id column survives
-    # get_matched_pairs (it just carries through like any other column) and lets
-    # us count actual distinct rows instead.
-    id_col = "_diagnostics_row_id"
-    df_before = df_before.copy()
-    df_before[id_col] = np.arange(len(df_before))
-
-    matched = get_matched_pairs(df_before, treatment_col, propensity_col, caliper, random_state=random_state)
-
-    balance = balance_table(df_before, matched, covariate_cols, treatment_col)
-    # Overlap must be measured on the pre-matching candidate pool, not on
-    # `matched`. apply_common_support_trim's "overlap" method derives its trim
-    # bounds from whatever population it's given, so running it on the matched
-    # output is close to tautological: matched pairs were already selected for
-    # being within a caliper of each other, so pct_within_overlap reads ~100%
-    # almost regardless of how little the original treated/control populations
-    # actually overlapped. Measuring it on df_before instead reports genuine
-    # overlap in the candidate pool, which is what the LLM critique's "common
-    # support overlap is strong/weak" flag is actually supposed to reflect.
     overlap = overlap_diagnostics(df_before, propensity_col, treatment_col)
 
-    n_treated_total = int((df_before[treatment_col] == 1).sum())
+    id_col = "_diagnostics_row_id"
+    candidates = apply_common_support_trim(df_before, propensity_col, treatment_col, method=trim_method)
+    candidates[id_col] = np.arange(len(candidates))
+
+    matched = get_matched_pairs(candidates, treatment_col, propensity_col, caliper, random_state=random_state)
+
+    balance = balance_table(candidates, matched, covariate_cols, treatment_col)
+
+    n_treated_total = int((candidates[treatment_col] == 1).sum())
     n_pairs = int((matched[treatment_col] == 1).sum())
     n_control_unique = int(matched.loc[matched[treatment_col] == 0, id_col].nunique())
     match_rate = n_pairs / n_treated_total if n_treated_total > 0 else 0.0
@@ -169,7 +175,7 @@ def run_full_diagnostics(
 
     if n_control_unique != n_pairs:
         logger.warning(
-            "%d matched pairs but only %d distinct control rows were used — "
+            "%d matched pairs but only %d distinct control rows were used, "
             "matching is not behaving as strict 1:1 without replacement.",
             n_pairs,
             n_control_unique,
@@ -189,9 +195,9 @@ def run_full_diagnostics(
         "matched_df": matched,
         "n_imbalanced_covariates": int(balance["still_imbalanced"].sum()),
         "pct_within_overlap": overlap["pct_within_overlap"],
+        "overlap_coefficient": overlap["overlap_coefficient"],
         "n_pairs": n_pairs,
         "n_treated_total": n_treated_total,
         "match_rate": match_rate,
         "n_control_unique": n_control_unique,
     }
-
