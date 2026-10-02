@@ -11,23 +11,17 @@ import streamlit as st
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
-from src.utils.db import fetch_estimation_runs
-from src.utils.logging_config import configure_logging
-from src.utils.power_analysis import mde_comparison_table
-
-# Nothing here reads .env directly -- every credential is read via os.environ.get()
-# inside src/utils/db.py, src/utils/logging_config.py, and src/llm_critique/critique.py.
-# Without this, a .env file with real keys in it is silently ignored and every
-# provider falls back (SQLite instead of Supabase, console instead of Logfire,
-# rule-based instead of an actual LLM call) even though the keys are "set."
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
+from src.sensitivity.rosenbaum import classify_gamma
+from src.utils.db import fetch_estimation_runs
+from src.utils.logging_config import configure_logging
+from src.utils.power_analysis import mde_comparison_table
+
 configure_logging()
 
-# Absolute, not relative to cwd: relative paths broke if the dashboard was ever
-# launched from a directory other than the project root.
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "processed")
 
 st.set_page_config(
@@ -37,19 +31,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------------------------
-# Design tokens
-#
-# A "research instrument" identity, not a generic SaaS dashboard: a cool
-# neutral paper background, a deep ink-blue for structure, a restrained gold
-# for the handful of signal moments (active tab, key emphasis), and a
-# muted, jewel-toned quartet of method colors used consistently across every
-# chart, table, and badge in the app instead of matplotlib's default tab10.
-#
-# Type: Source Serif 4 for headings (an editorial, rigorous voice), Public
-# Sans for body/UI text, IBM Plex Mono for anything that reads as a
-# measurement, an estimate, a p-value, a gamma.
-# ---------------------------------------------------------------------------
 INK = "#1B1E24"
 INK_SOFT = "#5B6270"
 PAPER = "#EEF0F3"
@@ -60,15 +41,6 @@ PRIMARY = "#223A5E"
 PRIMARY_SOFT = "#3D5A80"
 ACCENT = "#B8862B"
 
-# One chart size for every st.pyplot() figure in the app, sized against the
-# ~1180px content column (see .block-container max-width) and the 128px
-# metric-card height these charts usually sit under, rather than each call
-# site picking its own figsize. At CHART_DPI, this renders ~875x420px --
-# comfortably narrower than the content column and short enough that a chart
-# plus its heading and caption fit in a normal viewport without scrolling
-# mid-figure. Previously each chart used a different ad hoc figsize (up to
-# 8x5in), which at a legible DPI produced figures larger than the content
-# column itself.
 CHART_FIGSIZE = (7, 3.4)
 CHART_DPI = 125
 
@@ -118,15 +90,12 @@ def inject_custom_css():
             max-width: 1180px;
         }}
 
-        /* Streamlit's fixed top toolbar sits above the content at scroll position 0;
-           without enough clearance above it clips the first element (the masthead
-           eyebrow). Blend it into the page background instead of hiding it, since it
-           still holds the sidebar toggle. */
+
         [data-testid="stHeader"] {{
             background: var(--paper);
         }}
 
-        /* ---- Typography ---- */
+
         h1, h2, h3, h4 {{
             font-family: 'Source Serif 4', Georgia, serif !important;
             color: var(--ink) !important;
@@ -152,7 +121,7 @@ def inject_custom_css():
             font-family: 'IBM Plex Mono', monospace !important;
         }}
 
-        /* ---- Eyebrow labels (section kicker, mono + gold) ---- */
+
         .eyebrow {{
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.72rem;
@@ -164,7 +133,7 @@ def inject_custom_css():
         }}
         .eyebrow.sub {{ color: var(--primary-soft); }}
 
-        /* ---- Masthead ---- */
+
         .masthead {{
             text-align: center;
             max-width: 860px;
@@ -200,7 +169,7 @@ def inject_custom_css():
             border-radius: 2px;
         }}
 
-        /* ---- Sidebar ---- */
+
         [data-testid="stSidebar"] {{
             background: var(--surface);
             border-right: 1px solid var(--border);
@@ -234,7 +203,7 @@ def inject_custom_css():
         .status-dot.pending {{ background: var(--surface); border: 1.5px solid #C3C9D2; }}
         .status-row.pending {{ color: var(--ink-soft); }}
 
-        /* ---- Metrics ---- */
+
         [data-testid="stMetric"] {{
             background: var(--surface);
             border: 1px solid var(--border);
@@ -269,12 +238,8 @@ def inject_custom_css():
         [data-testid="stMetricDelta"] {{
             font-family: 'IBM Plex Mono', monospace !important;
         }}
-        /* Every metric card in a row gets the same fixed height (set once, above)
-           regardless of whether it has a delta pill or a two-line label, rather
-           than relying on flex/percentage stretch through Streamlit's nested
-           wrapper divs, which doesn't reliably equalize sibling heights. */
 
-        /* ---- Tabs ---- */
+
         [data-testid="stTabs"] [role="tablist"] {{
             display: flex;
             width: 100%;
@@ -307,14 +272,14 @@ def inject_custom_css():
             font-weight: 600 !important;
         }}
 
-        /* ---- DataFrame / tables ---- */
+
         [data-testid="stDataFrame"] {{
             border: 1px solid var(--border);
             border-radius: var(--radius);
             overflow: hidden;
         }}
 
-        /* ---- Buttons ---- */
+
         [data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-secondaryFormSubmit"] {{
             border-radius: 8px !important;
             border: 1px solid var(--primary) !important;
@@ -322,9 +287,7 @@ def inject_custom_css():
             font-family: 'Public Sans', sans-serif !important;
             font-weight: 600 !important;
         }}
-        /* Was a full solid-navy invert on hover, which is a different, harsher
-           convention than the download buttons below (border/text shift only)
-           in the same dashboard. Matched to that quieter convention instead. */
+
         [data-testid="stBaseButton-secondary"]:hover {{
             background: var(--surface-alt) !important;
             border-color: var(--primary) !important;
@@ -343,12 +306,8 @@ def inject_custom_css():
             color: var(--primary) !important;
         }}
 
-        /* ---- Alerts ---- */
-        /* Matches the metric card's fixed height (set above) so a metric +
-           alert pair sitting side-by-side in the same st.columns row (e.g.
-           "Qini coefficient" / model-quality note, "Critical Gamma" /
-           fragility note) line up instead of the alert floating at whatever
-           height its text happens to need. */
+
+        
         [data-testid="stAlert"] {{
             border-radius: var(--radius);
             font-family: 'Public Sans', sans-serif;
@@ -358,7 +317,7 @@ def inject_custom_css():
             box-sizing: border-box;
         }}
 
-        /* ---- Number input (MDE toggles) ---- */
+
         [data-testid="stNumberInputContainer"] {{
             background: var(--surface) !important;
             border: 1.5px solid var(--border) !important;
@@ -380,19 +339,19 @@ def inject_custom_css():
             background: var(--border) !important;
         }}
 
-        /* ---- Expander ---- */
+
         [data-testid="stExpander"] {{
             border: 1px solid var(--border);
             border-radius: var(--radius);
             background: var(--surface);
         }}
 
-        /* ---- Progress bar ---- */
+
         [data-testid="stProgress"] > div > div {{ background: var(--accent) !important; }}
 
         hr {{ border-color: var(--border) !important; }}
 
-        /* ---- Card wrapper (used for pipeline overview) ---- */
+
         .ci-card {{
             background: var(--surface);
             border: 1px solid var(--border);
@@ -400,7 +359,7 @@ def inject_custom_css():
             padding: 1.1rem 1.25rem;
         }}
 
-        /* ---- Critique tab: source badge pill ---- */
+
         .source-pill {{
             display: inline-flex;
             align-items: center;
@@ -450,10 +409,6 @@ def eyebrow(text: str, sub: bool = False):
 
 inject_custom_css()
 
-# ---------------------------------------------------------------------------
-# Shared matplotlib styling: one consistent look for every chart in the app,
-# tuned to match the CSS token palette above rather than matplotlib defaults.
-# ---------------------------------------------------------------------------
 plt.rcParams.update(
     {
         "axes.spines.top": False,
@@ -478,9 +433,6 @@ plt.rcParams.update(
         "axes.facecolor": "none",
         "savefig.facecolor": "none",
         "legend.frameon": False,
-        # Charts now render at native figsize (see st.pyplot(..., width="content")
-        # below) instead of being stretched to fill the container, so CHART_DPI
-        # keeps them crisp at CHART_FIGSIZE's actual on-screen size.
         "figure.dpi": CHART_DPI,
     }
 )
@@ -492,10 +444,6 @@ def _new_fig(figsize):
 
 
 def _file_mtime(path: str):
-    """Returns a file's modification time, or None if it doesn't exist.
-    Passed as a cache key argument so cached loaders auto-invalidate the
-    moment the underlying file changes (e.g. after rerunning a notebook),
-    without needing a manual refresh for file-backed artifacts."""
     return os.path.getmtime(path) if os.path.exists(path) else None
 
 
@@ -525,8 +473,6 @@ def load_csv(filename: str, mtime=None):
 
 
 def load_json_fresh(filename: str):
-    """Convenience wrapper: pass the current mtime so the cache is keyed
-    correctly without every call site needing to compute it manually."""
     return load_json(filename, mtime=_file_mtime(os.path.join(DATA_DIR, filename)))
 
 
@@ -536,9 +482,6 @@ def load_csv_fresh(filename: str):
 
 @st.cache_data(ttl=30, show_spinner=False)
 def cached_fetch_estimation_runs():
-    """Database reads have no local file mtime to key on, so this relies
-    on a short TTL (30s) plus the manual 'Refresh data' button below for
-    on-demand invalidation right after a notebook run finishes."""
     return fetch_estimation_runs()
 
 
@@ -547,8 +490,6 @@ def missing_data_notice(what: str, notebook: str):
 
 
 def freshness_caption(filename: str):
-    """Shows when this artifact file was last written, so it's obvious
-    if the dashboard is displaying results from an old notebook run."""
     path = os.path.join(DATA_DIR, filename)
     mtime = _file_mtime(path)
     if mtime is not None:
@@ -582,10 +523,6 @@ def status_pill(present: bool, label: str):
     )
 
 
-# ---------------------------------------------------------------------------
-# Sidebar: project summary + pipeline status, so it's obvious at a glance
-# which notebooks still need to be run rather than digging through tabs.
-# ---------------------------------------------------------------------------
 with st.sidebar:
     eyebrow("Criteo Uplift v2.1")
     st.markdown("### Pipeline Status")
@@ -637,9 +574,6 @@ with st.sidebar:
             "If a section looks empty, run the notebook listed next to it above."
         )
 
-# ---------------------------------------------------------------------------
-# Masthead
-# ---------------------------------------------------------------------------
 st.markdown(
     """
     <div class="masthead">
@@ -663,15 +597,18 @@ tab1, tab1_5, tab2, tab3, tab4, tab5 = st.tabs(
     ]
 )
 
-# ---------------------------------------------------------------------------
-# Section 1: Validation via self-induced confounding
-# ---------------------------------------------------------------------------
 with tab1:
     eyebrow("Stage 01")
     st.header("Bias-Severity Curve")
     st.write(
         "Naive OLS, PSM, IPW, and AIPW estimates across confounding severities, "
         "compared against the ground-truth ATE from the full randomized dataset."
+    )
+    st.caption(
+        "Each point is the mean over independent subsample replicates and each bar spans the 2.5th to "
+        "97.5th percentile of the replicate estimates. PSM estimates the effect on the matched treated "
+        "units only (1:1 without replacement, capped by the retained control count), so under "
+        "confounding it targets a different population than the full-sample ATE."
     )
 
     ground_truth = load_json_fresh("ground_truth.json")
@@ -693,14 +630,14 @@ with tab1:
 
         for method, group in runs_df.groupby("method"):
             group = group.set_index("severity_label").reindex(present_severities).reset_index()
+            group["x_pos"] = np.arange(len(group))
             group = group.dropna(subset=["point_estimate"])
-            x = range(len(group))
             ax.errorbar(
-                x,
+                group["x_pos"],
                 group["point_estimate"],
                 yerr=[
-                    group["point_estimate"] - group["ci_lower"],
-                    group["ci_upper"] - group["point_estimate"],
+                    np.clip(group["point_estimate"] - group["ci_lower"], 0, None),
+                    np.clip(group["ci_upper"] - group["point_estimate"], 0, None),
                 ],
                 marker="o",
                 label=METHOD_LABELS.get(method, method),
@@ -722,8 +659,8 @@ with tab1:
         fig.tight_layout()
 
         st.pyplot(fig, width="content")
+        plt.close(fig)
 
-        # Headline takeaway: which method is most/least biased at the strongest severity present.
         if ground_truth is not None and present_severities:
             strongest = present_severities[-1]
             at_strongest = runs_df[runs_df["severity_label"] == strongest].copy()
@@ -731,12 +668,18 @@ with tab1:
                 at_strongest["abs_bias"] = (at_strongest["point_estimate"] - ground_truth["ate"]).abs()
                 best = at_strongest.loc[at_strongest["abs_bias"].idxmin()]
                 worst = at_strongest.loc[at_strongest["abs_bias"].idxmax()]
-                st.success(
+                best_covers_truth = bool(best["ci_lower"] <= ground_truth["ate"] <= best["ci_upper"])
+                coverage_note = (
+                    "its replicate band contains the ground truth."
+                    if best_covers_truth
+                    else "its replicate band does not contain the ground truth."
+                )
+                st.info(
                     f"At **{strongest}** confounding severity: **{METHOD_LABELS.get(best['method'], best['method'])}** "
-                    f"stayed closest to the ground truth (bias {best['abs_bias']:.4f}), while "
-                    f"**{METHOD_LABELS.get(worst['method'], worst['method'])}** drifted furthest "
-                    f"(bias {worst['abs_bias']:.4f}).",
-                    icon=":material/check_circle:",
+                    f"was closest to the ground truth (absolute bias {best['abs_bias']:.4f}) and {coverage_note} "
+                    f"**{METHOD_LABELS.get(worst['method'], worst['method'])}** was furthest "
+                    f"(absolute bias {worst['abs_bias']:.4f}).",
+                    icon=":material/info:",
                 )
 
         with st.expander("Show raw estimation run log"):
@@ -748,7 +691,6 @@ with tab1:
                 width="stretch",
             )
             download_button(display_df, "estimation runs", "estimation_runs.csv")
-            freshness_caption("ground_truth.json")
 
     st.subheader("Covariate Balance (matching diagnostics)")
     balance_df = load_csv_fresh("balance_table.csv")
@@ -766,10 +708,7 @@ with tab1:
 
         match_diag = load_json_fresh("match_diagnostics.json")
         if match_diag is not None:
-            # Matching is strict 1:1 without replacement, so with ~85% of the sample
-            # treated, most treated units are expected to go unmatched — this reports
-            # exactly how much of the treated group the matched sample above is based on.
-            mc1, mc2, mc3 = st.columns(3)
+            mc1, mc2, mc3, mc4 = st.columns(4)
             mc1.metric(
                 "Treated units matched",
                 f"{100 * match_diag['match_rate']:.1f}%",
@@ -778,29 +717,47 @@ with tab1:
             mc2.metric("Distinct controls used", f"{match_diag['n_control_unique']:,}")
             controls_match = match_diag["n_control_unique"] == match_diag["n_pairs"]
             mc3.metric("Each control used once", "Yes" if controls_match else "No")
+            if "overlap_coefficient" in match_diag:
+                mc4.metric(
+                    "Propensity overlap coefficient",
+                    f"{match_diag['overlap_coefficient']:.2f}",
+                    help="1.0 means identical treated and control propensity distributions, 0.0 means disjoint.",
+                )
 
         format_cols = {c: "{:.4f}" for c in ["smd_before", "smd_after"] if c in balance_df.columns}
         st.dataframe(balance_df.style.format(format_cols), width="stretch")
         download_button(balance_df, "balance table", "balance_table.csv")
         freshness_caption("balance_table.csv")
 
-# ---------------------------------------------------------------------------
-# Section 1.5: Outcome variable justification
-# ---------------------------------------------------------------------------
 with tab1_5:
     eyebrow("Stage 01.5")
     st.header("Outcome Variable Justification (MDE)")
     st.write(
-        "Minimum detectable effect for `visit` vs `conversion` at the planned Section 2 "
-        "subsample size. This is computed live since it's cheap; no precomputed file needed."
+        "Minimum detectable effect for `visit` vs `conversion` at the Section 2 analysis sample, "
+        "using control-arm base rates and the actual treated-to-control ratio. Defaults come from "
+        "`ground_truth.json` when it exists."
     )
 
-    col1, col2, col3 = st.columns(3)
-    visit_rate = col1.number_input("visit base rate", value=0.045, format="%.4f")
-    conversion_rate = col2.number_input("conversion base rate", value=0.003, format="%.4f")
-    n_per_group = col3.number_input("planned n per group", value=100_000, step=10_000)
+    mde_defaults = load_json_fresh("ground_truth.json") or {}
+    col1, col2, col3, col4 = st.columns(4)
+    visit_rate = col1.number_input(
+        "visit control rate", value=float(mde_defaults.get("visit_control_rate", 0.0382)), format="%.4f"
+    )
+    conversion_rate = col2.number_input(
+        "conversion control rate", value=float(mde_defaults.get("conversion_control_rate", 0.0019)), format="%.4f"
+    )
+    n_control = col3.number_input(
+        "control units", value=int(mde_defaults.get("analysis_n_control", 22_500)), min_value=1, step=1_000
+    )
+    n_treated = col4.number_input(
+        "treated units", value=int(mde_defaults.get("analysis_n_treated", 127_500)), min_value=1, step=1_000
+    )
 
-    table = mde_comparison_table({"visit": visit_rate, "conversion": conversion_rate}, int(n_per_group))
+    table = mde_comparison_table(
+        {"visit": visit_rate, "conversion": conversion_rate},
+        int(n_control),
+        ratio=float(n_treated) / float(n_control),
+    )
 
     m1, m2 = st.columns(2)
     visit_row = table[table["outcome"] == "visit"].iloc[0]
@@ -825,9 +782,6 @@ with tab1_5:
         "for the full-dataset ground-truth ATE in Section 1."
     )
 
-# ---------------------------------------------------------------------------
-# Section 2: Heterogeneity / segmentation
-# ---------------------------------------------------------------------------
 with tab2:
     eyebrow("Stage 02")
     st.header("Segment-Level CATE Breakdown")
@@ -847,14 +801,25 @@ with tab2:
         download_button(segment_df, "segment effects", "segment_effects.csv")
         freshness_caption("segment_effects.csv")
 
+        separation = load_json_fresh("segment_separation.json")
+        if separation is not None:
+            st.metric(
+                "Predicted-CATE variance explained by segments (eta squared)",
+                f"{separation['eta_squared']:.3f}",
+            )
+            st.caption(
+                "Measures how much of the model's predicted effect variation the segmentation captures. "
+                "Observed per-segment effects are randomized comparisons regardless of this value."
+            )
+
         fig, ax = _new_fig(CHART_FIGSIZE)
         y_pos = np.arange(len(segment_df))
         ax.errorbar(
             segment_df["point_estimate"],
             y_pos,
             xerr=[
-                segment_df["point_estimate"] - segment_df["ci_lower"],
-                segment_df["ci_upper"] - segment_df["point_estimate"],
+                np.clip(segment_df["point_estimate"] - segment_df["ci_lower"], 0, None),
+                np.clip(segment_df["ci_upper"] - segment_df["point_estimate"], 0, None),
             ],
             fmt="o",
             capsize=3,
@@ -868,6 +833,7 @@ with tab2:
         ax.set_title("Per-segment treatment effect with bootstrap CI")
         fig.tight_layout()
         st.pyplot(fig, width="content")
+        plt.close(fig)
 
     st.subheader("Qini Curve (CATE model quality)")
     qini_result = load_json_fresh("qini_curve.json")
@@ -875,16 +841,27 @@ with tab2:
         missing_data_notice("Qini curve", "notebooks/02_heterogeneity.ipynb")
     else:
         qini_coef = qini_result["qini_coefficient"]
+        ci_lower = qini_result.get("ci_lower")
+        ci_upper = qini_result.get("ci_upper")
+        has_ci = ci_lower is not None and ci_upper is not None
         m1, m2 = st.columns([1, 2])
         m1.metric("Qini coefficient", f"{qini_coef:.4f}")
-        if qini_coef > 0.02:
-            m2.success("Model ranks units by uplift meaningfully better than random targeting.", icon=":material/check_circle:")
-        elif qini_coef > 0:
-            m2.info("Model beats random targeting, but the margin is modest, interpret segments with care.", icon=":material/info:")
-        else:
+        if not has_ci:
+            m2.info("No bootstrap interval was saved, so the coefficient cannot be compared with random targeting.", icon=":material/info:")
+        elif ci_lower > 0:
+            m2.success(
+                f"The bootstrap interval [{ci_lower:.4f}, {ci_upper:.4f}] excludes zero: the model ranks units better than random targeting.",
+                icon=":material/check_circle:",
+            )
+        elif ci_upper < 0:
             m2.warning(
-                "Model is not clearly better than random targeting, segment findings below may not reflect real heterogeneity.",
+                f"The bootstrap interval [{ci_lower:.4f}, {ci_upper:.4f}] lies below zero: the model ranks units worse than random targeting.",
                 icon=":material/warning:",
+            )
+        else:
+            m2.info(
+                f"The bootstrap interval [{ci_lower:.4f}, {ci_upper:.4f}] includes zero: the model cannot be distinguished from random targeting.",
+                icon=":material/info:",
             )
 
         fig, ax = _new_fig(CHART_FIGSIZE)
@@ -901,11 +878,9 @@ with tab2:
         ax.set_title("Qini Curve")
         fig.tight_layout()
         st.pyplot(fig, width="content")
+        plt.close(fig)
         freshness_caption("qini_curve.json")
 
-# ---------------------------------------------------------------------------
-# Section 3: Statistical rigor
-# ---------------------------------------------------------------------------
 with tab3:
     eyebrow("Stage 03")
     st.header("Multiple Comparison Correction")
@@ -916,12 +891,11 @@ with tab3:
         n_sig = int(segment_df["significant_after_correction"].sum())
         n_total = len(segment_df)
         n_sig_raw = int((segment_df["p_value"] < 0.05).sum())
+        st.caption(
+            "Each test asks whether a segment's effect differs from zero. It does not ask whether "
+            "segments differ from each other; that is tested separately below."
+        )
         m1, m2 = st.columns(2)
-        # The delta belongs on "after correction" (it's the thing correction
-        # changed), not on "before correction" where it previously sat -- and
-        # BH correction can only ever remove significance, never add it, so a
-        # delta of 0 means nothing to report; pass None rather than show a
-        # bare "0" badge.
         m1.metric(
             "Segments significant after BH correction",
             f"{n_sig} / {n_total}",
@@ -937,6 +911,29 @@ with tab3:
         download_button(segment_df[display_cols], "BH-corrected segments", "segment_significance.csv")
         freshness_caption("segment_effects.csv")
 
+    st.subheader("Do effects differ across segments?")
+    heterogeneity = load_json_fresh("segment_heterogeneity.json")
+    if heterogeneity is None:
+        missing_data_notice("Effect heterogeneity test", "notebooks/02_heterogeneity.ipynb")
+    elif any(heterogeneity.get(k) is None for k in ("q_statistic", "p_value", "i_squared")):
+        st.info(
+            "The heterogeneity test could not be computed: it needs at least two segments with positive standard errors.",
+            icon=":material/info:",
+        )
+    else:
+        h1, h2, h3 = st.columns(3)
+        h1.metric("Cochran Q", f"{heterogeneity['q_statistic']:.2f}")
+        h2.metric("p-value", f"{heterogeneity['p_value']:.4f}")
+        h3.metric("I squared", f"{100 * heterogeneity['i_squared']:.0f}%")
+        if heterogeneity["p_value"] < 0.05:
+            st.info("Evidence that treatment effects differ between segments.", icon=":material/info:")
+        else:
+            st.info(
+                "No evidence that treatment effects differ between segments, even if some segments are individually significant.",
+                icon=":material/info:",
+            )
+        freshness_caption("segment_heterogeneity.json")
+
     eyebrow("Stage 03", sub=True)
     st.header("Per-Segment Power Analysis")
     power_df = load_csv_fresh("segment_power.csv")
@@ -948,6 +945,11 @@ with tab3:
         st.dataframe(power_df.style.format(format_cols), width="stretch")
         download_button(power_df, "segment power", "segment_power.csv")
         freshness_caption("segment_power.csv")
+        if "effect_size_used" in power_df.columns and "effect_size_source" in power_df.columns:
+            st.caption(
+                f"Assumed effect size {power_df['effect_size_used'].iloc[0]:.5f} "
+                f"({power_df['effect_size_source'].iloc[0]})."
+            )
 
         if n_underpowered > 0:
             st.warning(
@@ -958,33 +960,39 @@ with tab3:
         else:
             st.success("All segments are adequately powered at the assumed effect size.", icon=":material/check_circle:")
 
-# ---------------------------------------------------------------------------
-# Section 4: Sensitivity analysis
-# ---------------------------------------------------------------------------
 with tab4:
     eyebrow("Stage 04")
     st.header("Rosenbaum Sensitivity Bounds")
     bounds_df = load_csv_fresh("rosenbaum_bounds.csv")
-    if bounds_df is None:
-        missing_data_notice("Rosenbaum bounds table", "notebooks/03_sensitivity.ipynb")
+    critical = load_json_fresh("rosenbaum_critical.json")
+    if bounds_df is None or critical is None:
+        missing_data_notice("Rosenbaum bounds", "notebooks/03_sensitivity.ipynb")
     else:
-        alpha = 0.05
-        crossing = bounds_df[bounds_df["worst_case_p_value"] >= alpha]
-        approx_critical_gamma = float(crossing["gamma"].iloc[0]) if len(crossing) > 0 else None
+        alpha = critical["alpha"]
+        status = classify_gamma(critical)
 
         m1, m2 = st.columns(2)
-        if approx_critical_gamma is not None:
-            m1.metric("Approx. critical Gamma", f"{approx_critical_gamma:.2f}")
-            if approx_critical_gamma < 1.5:
+        if status == "not_significant":
+            m1.metric("Critical Gamma", "n/a")
+            m2.warning(
+                "The matched-pair result is not significant even with no unmeasured confounding, so there is nothing to overturn.",
+                icon=":material/warning:",
+            )
+        elif critical["critical_gamma"] is None:
+            m1.metric("Critical Gamma", f"> {critical['gamma_max_checked']:.1f}")
+            m2.success("Robust to every confounding strength checked.", icon=":material/check_circle:")
+        else:
+            m1.metric("Critical Gamma", f"{critical['critical_gamma']:.2f}")
+            if status == "fragile":
                 m2.warning("Fragile: only mild unmeasured confounding would overturn this conclusion.", icon=":material/warning:")
-            elif approx_critical_gamma < 3:
+            elif status == "moderate":
                 m2.info("Moderately robust to unmeasured confounding.", icon=":material/info:")
             else:
                 m2.success("Robust: substantial unmeasured confounding would be needed to overturn this.", icon=":material/check_circle:")
-        else:
-            m1.metric("Approx. critical Gamma", f"> {bounds_df['gamma'].max():.2f}")
-            m2.success("Robust to every confounding strength checked in this table.", icon=":material/check_circle:")
-        st.caption("Approximate value read off the saved bounds table's grid resolution, not re-solved exactly.")
+        st.caption(
+            f"{critical['n_pairs']:,} matched pairs, {critical['n_discordant']:,} discordant "
+            f"({critical['n_plus']:,} favoring treatment, {critical['n_minus']:,} favoring control)."
+        )
 
         fig, ax = _new_fig(CHART_FIGSIZE)
         ax.plot(bounds_df["gamma"], bounds_df["worst_case_p_value"], marker="o", markersize=3, color=PRIMARY_SOFT, linewidth=2)
@@ -995,15 +1003,13 @@ with tab4:
         ax.legend()
         fig.tight_layout()
         st.pyplot(fig, width="content")
+        plt.close(fig)
 
         with st.expander("Show raw bounds table"):
             st.dataframe(bounds_df.style.format({"worst_case_p_value": "{:.4f}"}), width="stretch")
             download_button(bounds_df, "Rosenbaum bounds", "rosenbaum_bounds.csv")
             freshness_caption("rosenbaum_bounds.csv")
 
-# ---------------------------------------------------------------------------
-# Section 5: Diagnostic critique (LLM)
-# ---------------------------------------------------------------------------
 with tab5:
     eyebrow("Stage 05")
     st.header("Diagnostic Critique")
@@ -1023,8 +1029,8 @@ with tab5:
 
         if is_fallback:
             st.caption(
-                "No Groq/NIM API key was configured when this was generated, so this is a "
-                "rule-based fallback, not an actual LLM response."
+                "This is a rule-based fallback, not an LLM response: no Groq/NIM API key was configured, "
+                "or every provider call failed or returned unusable output."
             )
 
         with st.container(border=True):
