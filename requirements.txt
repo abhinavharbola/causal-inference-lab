@@ -1,36 +1,18 @@
-# Data
-datasets>=2.19          # Hugging Face loader
+datasets>=2.19
 pandas>=2.0
 numpy>=1.24
-scikit-uplift>=0.5.1    # sklift, fallback loader + Qini metrics
-
-# Modeling / causal inference
-scikit-learn>=1.4       
-statsmodels>=0.14       # OLS, power analysis (NormalIndPower, MDE), BH correction, proportions z-test
-scipy>=1.11             # bootstrap, hypothesis tests, Rosenbaum bounds (binom, pearsonr)
-sortedcontainers>=2.4   # O(log n) nearest-available lookup/removal for 1:1 PSM without replacement
-
-# Plotting (love plots, Qini curve, Rosenbaum bounds plot, dashboard charts)
+pyarrow>=14.0
+scikit-uplift>=0.5.1
+scikit-learn>=1.4
+statsmodels>=0.14
+scipy>=1.11
+sortedcontainers>=2.4
 matplotlib>=3.8
-
-# Dashboard
-streamlit>=1.35
-
-# Env vars (.env -> os.environ; nothing else in this project reads .env directly)
+streamlit>=1.50
 python-dotenv>=1.0
-
-# Database: Supabase primary, with a local SQLite fallback built into src/utils/db.py
 supabase>=2.4
-
-# Logging
 logfire>=0.30
-
-# LLM (free-tier diagnostic critique step only)
-groq>=0.9               # primary provider
-openai>=1.30            # OpenAI-compatible client, used for the NVIDIA NIM fallback provider
-
-# Testing
+groq>=0.9
+openai>=1.30
 pytest>=8.0
-
-# Notebook environment
 jupyter>=1.0
