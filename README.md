@@ -88,10 +88,10 @@ flowchart TD
 
 ### Section 1: Validation via self-induced confounding
 
-- **Retention mechanism.** Randomization is broken by keeping rows as a function of one covariate X and treatment, holding fixed the overall retention rate (`keep_fraction`, default 0.5) and the marginal distribution of X. With treated share `p`, treated rows are kept with probability `lower + (upper - lower) * sigmoid(g2 * X)`; control rows get whatever probability keeps `p * treated_prob + (1 - p) * control_prob = keep_fraction` at every X. `g2 = 0` means no confounding. Because X's distribution is unchanged, the full-data ATE stays the right target for the ATE estimators even when effects vary with X.
-- **Gate.** X is the feature most correlated with the outcome. The gate requires a significant X-treatment correlation in the retained sample and the ground-truth ATE outside the 95% interval of the naive estimate computed on that same sample. Comparing against the full-data interval (about +/-0.0003) would pass on sampling noise alone.
-- **Calibration.** Starts at `g2 = 0.25`, steps by 0.25, keeps the smallest `g2` that passes, and raises if none passes within `max_iters`. Severities: `none` (0), `mild` (g2), `moderate` (2 x g2), `strong` (3 x g2).
-- **Replicates.** Each of `N_REPLICATES` (default 20) draws a fresh 300,000-row subsample, applies every severity, and runs all four estimators. The logged estimate is the replicate mean; the band is the 2.5th to 97.5th percentile of replicate estimates.
+- **Retention.** Rows are kept as a function of one covariate X and treatment, holding fixed the retention rate (`keep_fraction`, default 0.5) and the marginal distribution of X. With treated share `p`, treated rows are kept with probability `lower + (upper - lower) * sigmoid(g2 * X)`, and control rows with the probability that keeps `p * treated_prob + (1 - p) * control_prob = keep_fraction` at every X. `g2 = 0` is no confounding. X's distribution is unchanged, so the full-data ATE stays the right target even when effects vary with X.
+- **Gate.** X is the feature most correlated with the outcome. The gate needs a significant X-treatment correlation and the ground-truth ATE outside the 95% interval of the naive estimate on the same retained sample (the full-data interval, about +/-0.0003, would pass on noise alone).
+- **Calibration.** From `g2 = 0.25` in steps of 0.25, keep the smallest passing `g2`; raise if none passes within `max_iters`. Severities: `none` (0), `mild` (g2), `moderate` (2 x g2), `strong` (3 x g2).
+- **Replicates.** Each of `N_REPLICATES` (default 20) draws a fresh 300,000-row subsample, applies every severity, and runs all four estimators. Logged estimate: replicate mean. Logged band: 2.5th to 97.5th percentile.
 
 | Estimator | Population it estimates |
 |---|---|
@@ -99,9 +99,9 @@ flowchart TD
 | IPW, AIPW | Average treatment effect over the retained sample, which matches the full-data ATE in expectation by the retention design |
 | PSM | Effect on the matched treated units only (1:1 without replacement) |
 
-With about 85% treated, matched pairs are capped by the retained control count, so most treated units go unmatched. Without confounding the matched treated units are close to a random subset of the treated. Under confounding the control pool runs out first where controls are scarce, so they skew toward values where controls are plentiful, and PSM targets a different population than the full-sample ATE.
+With about 85% treated, pairs are capped by the retained control count, so most treated units go unmatched. Without confounding the matched treated units are close to a random subset of the treated; under confounding they skew toward values where controls are plentiful, so PSM targets a different population than the full-sample ATE.
 
-- **Diagnostics.** Balance, overlap, and the Section 4 matched pairs come from the first replicate's strong-severity sample, with the same cross-fitted propensity, trimming, and random state as the estimator comparison.
+- **Diagnostics.** From the first replicate's strong-severity sample, with the same cross-fitted propensity, trimming, and random state as the estimator comparison.
 - **Outputs:** `ground_truth.json`, `balance_table.csv`, `match_diagnostics.json`, `data/interim/confounded_strong_with_propensity.parquet`, and one logged run per method and severity.
 
 ### Section 1.5: Outcome selection
@@ -110,31 +110,29 @@ See [the MDE table above](#why-visit-not-conversion). Notebook 1 computes it fro
 
 ### Section 2: Heterogeneity
 
-A calibrated **T-learner** (two per-arm logistic regression pipelines with sigmoid calibration) is fit on a clean randomized 500,000-row sample with a treatment-stratified 30% holdout. Causal forests are future work.
+A calibrated **T-learner** (per-arm logistic regression with sigmoid calibration) on a clean randomized 500,000-row sample with a treatment-stratified 30% holdout. Causal forests are future work.
 
-- **Qini.** Coefficient with a 200-resample bootstrap interval; the dashboard judges the model against random targeting by whether the interval excludes zero.
-- **Segments.** 4 KMeans clusters on standardized covariates. Per-segment effects are observed treated-minus-control differences in the holdout (randomized comparisons regardless of how the clusters formed), with 1,000-resample bootstrap intervals.
-- **Separation.** `segment_cate_separation` reports eta-squared, the share of predicted-CATE variance the clusters capture. A low value means the clusters do not track what the model learned; it does not invalidate the observed segment effects.
-- **Outputs:** `qini_curve.json` (curve downsampled to at most 500 points), `segment_effects.csv`, `segment_separation.json`.
+- **Qini.** Coefficient with a 200-resample bootstrap interval; the dashboard checks whether it excludes zero.
+- **Segments.** 4 KMeans clusters on standardized covariates. Effects are observed treated-minus-control differences in the holdout (randomized regardless of how clusters formed), with 1,000-resample bootstrap intervals.
+- **Separation.** `segment_cate_separation` reports eta-squared, the share of predicted-CATE variance the clusters capture. A low value means the clusters do not track what the model learned; observed segment effects stay valid.
+- **Outputs:** `qini_curve.json` (at most 500 curve points), `segment_effects.csv`, `segment_separation.json`.
 
 ### Section 3: Statistical rigor and corrections
 
-- **Benjamini-Hochberg** corrects the per-segment tests of "effect differs from zero". A significant segment is not evidence of heterogeneity: a segment matching the overall effect is also significant.
-- **Cochran Q** (with I-squared) directly tests whether segment effects differ, using each segment's analytic standard error.
-- **Power** uses each segment's observed treated and control counts and the holdout's control-arm baseline. The assumed effect is the Section 1 ground-truth ATE (avoiding circularity), with its source saved as `effect_size_source`; it falls back to the median observed segment effect only if `ground_truth.json` is missing. Power is computed for the aggregate effect, so a segment can be both individually significant and underpowered.
+- **Benjamini-Hochberg** corrects the per-segment tests of "effect differs from zero". Significance is not heterogeneity: a segment matching the overall effect is also significant.
+- **Cochran Q** (with I-squared) tests directly whether segment effects differ, using each segment's analytic standard error.
+- **Power** uses observed per-segment arm counts and the holdout's control-arm baseline, with the Section 1 ground-truth ATE as the assumed effect (avoids circularity; source saved as `effect_size_source`, median segment effect only if `ground_truth.json` is missing). Because it is computed for the aggregate effect, a segment can be both significant and underpowered.
 - **Outputs:** `segment_heterogeneity.json`, `segment_power.csv`.
 
 ### Section 4: Sensitivity analysis
 
-**Rosenbaum bounds** run on the PSM pairs rebuilt with the same cross-fitted propensity, trimming, and random state as the estimator comparison, so they describe the sample PSM used. The critical Gamma is solved exactly by root finding on the worst-case p-value (alpha 0.05, up to Gamma 10); the bounds table uses a 0.1 grid for plotting.
-
-The result records whether the effect is significant at Gamma = 1; if not, no sensitivity conclusion applies, and the dashboard and critique say so. One shared rule classifies the outcome: critical Gamma below 1.5 is fragile, below 3 moderate, otherwise robust (including never crossed). With few discordant pairs, critical Gamma is low regardless of covariate quality, so read it with the discordant-pair count.
+**Rosenbaum bounds** run on the PSM pairs rebuilt with the estimator comparison's propensity, trimming, and random state. The critical Gamma is solved exactly (alpha 0.05, up to Gamma 10); the bounds table uses a 0.1 grid for plotting. The result records whether the effect is significant at Gamma = 1; if not, no sensitivity conclusion applies. One shared rule classifies it: critical Gamma below 1.5 is fragile, below 3 moderate, otherwise robust (including never crossed). Few discordant pairs force a low critical Gamma regardless of covariate quality, so read it with the discordant-pair count.
 
 **Outputs:** `rosenbaum_bounds.csv`, `rosenbaum_critical.json`, `rosenbaum_bounds.png`.
 
 ### Section 5: The one (and only) LLM step
 
-A critique over the balance table, overlap statistics, and the Rosenbaum result. **Groq** is primary, **NVIDIA NIM** the fallback, and a deterministic rule-based critique runs if both fail. A truncated or empty completion counts as a failure. The prompt states that Gamma is an odds ratio and must not be converted to a percentage. The LLM is used nowhere else.
+A critique over the balance table, overlap statistics, and the Rosenbaum result: **Groq** first, **NVIDIA NIM** second, then a deterministic rule-based critique. Truncated or empty completions count as failures. The prompt states Gamma is an odds ratio, never a percentage. The LLM is used nowhere else.
 
 Overlap is reported two ways: the share of the candidate pool inside the propensity range shared by both arms (lenient, near 100% for almost any data), and the overlap coefficient, the shared area of the two propensity histograms (1.0 identical, 0.0 disjoint), which the rule-based critique uses to flag weak overlap.
 
@@ -157,31 +155,27 @@ The dashboard uses the `width` argument on `st.pyplot`, `st.dataframe`, and `st.
 
 | Section | Method | Library | Role |
 |---|---|---|---|
-| 1 | Naive OLS | `statsmodels` | Baseline with no confounder adjustment |
-| 1 | Propensity score matching | `scikit-learn`, `sortedcontainers` | 1:1 without replacement, nearest neighbor on the logit of the propensity score, caliper of 0.2 logit standard deviations, random matching order |
-| 1 | IPW | `scikit-learn` | Hajek-normalized inverse probability weighting |
-| 1 | AIPW | `scikit-learn` | Doubly robust. Propensity cross-fitted once and shared with IPW and PSM; the two outcome models are also cross-fitted (`StratifiedKFold`, 5 folds) |
-| 1 | Common-support trim | `pandas` | Keeps rows inside the propensity range shared by both arms; propensities clipped to [0.001, 0.999] |
-| 2 | T-learner CATE | `scikit-learn` | Two calibrated per-arm outcome models; their difference is the CATE |
+| 1 | Naive OLS | `statsmodels` | Unadjusted baseline |
+| 1 | Propensity score matching | `scikit-learn`, `sortedcontainers` | 1:1 without replacement, nearest neighbor on logit propensity, caliper 0.2 logit SD, random order |
+| 1 | IPW | `scikit-learn` | Hajek-normalized weighting |
+| 1 | AIPW | `scikit-learn` | Doubly robust; outcome models cross-fitted (`StratifiedKFold`, 5 folds) on the shared cross-fitted propensity |
+| 1 | Common-support trim | `pandas` | Keeps the propensity range shared by both arms; propensities clipped to [0.001, 0.999] |
+| 2 | T-learner CATE | `scikit-learn` | Calibrated per-arm outcome models; their difference is the CATE |
 | 2 | Qini coefficient | `scikit-uplift` | Ranking quality versus random targeting, with a bootstrap interval |
-| 3 | Segment / CATE separation | `scipy` | One-way ANOVA and eta-squared of predicted CATE across segments |
+| 3 | Segment / CATE separation | `scipy` | One-way ANOVA and eta-squared of predicted CATE |
 | 3 | Benjamini-Hochberg | `statsmodels` | False discovery control across segment tests |
-| 3 | Effect heterogeneity | `scipy` | Cochran Q and I-squared across segment effects |
-| 4 | Rosenbaum bounds | `scipy` | Sensitivity of the matched-pairs conclusion to an unmeasured confounder |
+| 3 | Effect heterogeneity | `scipy` | Cochran Q and I-squared |
+| 4 | Rosenbaum bounds | `scipy` | Sensitivity of the matched-pairs conclusion to unmeasured confounding |
 
 ## Guardrails
 
-- **Calibration fails loudly.** If no `g2` passes within `max_iters`, `converged` is False and the notebook raises; there is no default severity.
-- **Noise-aware gate.** Ground truth is compared with the retained sample's own naive interval, so unconfounded data rarely passes.
-- **Estimand preserved.** Constant marginal retention across X keeps the full-data ATE the right target for IPW and AIPW.
-- **True 1:1 matching.** Matched controls leave the pool, and diagnostics count distinct control rows by identity, since Criteo covariates are bucketed and distinct rows often share values.
-- **One propensity everywhere.** Estimators, diagnostics, and Rosenbaum bounds share one cross-fitted propensity and one trimmed population, naive OLS included.
-- **Cross-fitted nuisance models.** `run_estimator_comparison` defaults to `cross_fit=True`, `n_splits=5`; `cross_fit=False` is available for comparison.
-- **Segments validated twice.** Eta-squared checks that clusters track predicted CATE; Cochran Q checks that effects genuinely differ.
-- **Explicit power inputs.** The assumed effect and its source are saved with the power table.
-- **Enforced data integrity.** Exact row count and columns and tight rate bands, checked on load.
+- **Fails loudly.** No passing `g2` within `max_iters` sets `converged` False and raises. Data integrity (exact row count and columns, tight rate bands) is checked on load.
+- **Valid benchmark.** The gate compares ground truth with the retained sample's own interval, and constant marginal retention keeps the full-data ATE the right target for IPW and AIPW.
+- **True 1:1 matching.** Matched controls leave the pool, and diagnostics count distinct control rows by identity, since Criteo covariates are bucketed and rows often share values.
+- **One propensity everywhere.** Estimators, diagnostics, and Rosenbaum share one cross-fitted propensity and one trimmed population, naive OLS included. Nuisance models are cross-fitted by default (`run_estimator_comparison`: `cross_fit=True`, `n_splits=5`; `cross_fit=False` to compare).
+- **Segments validated twice.** Eta-squared checks that clusters track predicted CATE; Cochran Q checks that effects genuinely differ. Power inputs and their source are saved.
 - **No silent row loss.** `severity_label` is required, failed remote writes fall back to SQLite, and reads merge both stores, keeping the newest row per key.
-- **LLM cannot change results.** It only interprets existing diagnostics, and truncated or empty output is rejected.
+- **LLM cannot change results.** It only interprets existing diagnostics.
 
 ## Project Structure
 
@@ -303,15 +297,10 @@ pytest tests/ -v
 
 ## Known limitations
 
-- **PSM coverage.** 1:1 matching without replacement is capped by the retained control count, so most treated units go unmatched. Without confounding the matched set is close to a random subset of the treated; under confounding it skews toward covariate values where controls are plentiful, so PSM targets a different population than the full-sample ATE.
-- **Design-specific bias curves.** Results depend on the covariate, retention mechanism, and replicate count; the replicate band reflects subsampling variability, not a confidence interval for the mean.
-- **Gate false passes.** At `g2 = 0` the gate can pass by chance, at a rate bounded by the 5% level of its correlation test. Calibration is a screen, not proof of confounding.
-- **`conversion` is too sparse for segments.** Its relative MDE at segment arm sizes is about 5x that of `visit`.
-- **Segment power uses the aggregate effect**, so a segment can be both significant and underpowered. This is intentional, to avoid circularity.
-- **Cochran Q is a large-sample approximation** treating segment effects as independent normal estimates: reasonable for disjoint subsets of one randomized holdout, but low-powered for small segments.
-- **Rosenbaum covers PSM only** (IPW and AIPW have no matched pairs) and is conservative with few discordant pairs.
-- **Rosenbaum is one-sided** (`alternative="greater"`): a harmful matched-pair effect is reported as not significant rather than as a sensitivity result.
-- **Bootstrap CIs omit nuisance-model uncertainty.** `run_estimator_comparison_with_ci` fits nuisance models once and bootstraps the resulting scores or pair differences; the replicate pipeline does not use it.
-- **Segmentation is not CATE-aware.** KMeans clusters on covariates, so clusters may not track predicted effect variation; eta-squared measures how well they do.
-- **Free-tier LLMs.** If both providers fail or return unusable output, the rule-based fallback runs: correct but less nuanced.
-- **Screenshots in `assets/` are static** and are not updated by the notebooks.
+- **PSM coverage.** 1:1 matching without replacement is capped by the retained control count, so most treated units go unmatched; under confounding the matched set skews toward values where controls are plentiful.
+- **Bias curves are design-specific.** They depend on the covariate, retention mechanism, and replicate count; the band is subsampling variability, not a confidence interval for the mean.
+- **Gate false passes.** At `g2 = 0` the gate can pass by chance, at a rate bounded by the 5% level of its correlation test. It is a screen, not proof of confounding.
+- **Segment tests are approximate.** Power uses the aggregate effect, so a segment can be significant yet underpowered (intentional, to avoid circularity). Cochran Q is a large-sample approximation and is low-powered for small segments.
+- **Rosenbaum is narrow.** It covers PSM only (IPW and AIPW have no matched pairs), is conservative with few discordant pairs, and is one-sided (`alternative="greater"`): a harmful effect shows as not significant.
+- **Bootstrap CIs omit nuisance-model uncertainty.** This applies to `run_estimator_comparison_with_ci`, which the replicate pipeline does not use.
+- **Segmentation is not CATE-aware.** KMeans clusters on covariates; eta-squared measures how well they track predicted effects.
