@@ -741,10 +741,18 @@ with tab1_5:
     mde_defaults = load_json_fresh("ground_truth.json") or {}
     col1, col2, col3, col4 = st.columns(4)
     visit_rate = col1.number_input(
-        "visit control rate", value=float(mde_defaults.get("visit_control_rate", 0.0382)), format="%.4f"
+        "visit control rate",
+        value=float(mde_defaults.get("visit_control_rate", 0.0382)),
+        min_value=0.000001,
+        step=0.0001,
+        format="%.6f",
     )
     conversion_rate = col2.number_input(
-        "conversion control rate", value=float(mde_defaults.get("conversion_control_rate", 0.0019)), format="%.4f"
+        "conversion control rate",
+        value=float(mde_defaults.get("conversion_control_rate", 0.0019)),
+        min_value=0.000001,
+        step=0.0001,
+        format="%.6f",
     )
     n_control = col3.number_input(
         "control units", value=int(mde_defaults.get("analysis_n_control", 22_500)), min_value=1, step=1_000
@@ -1037,3 +1045,5 @@ with tab5:
             st.markdown(critique["critique_text"])
 
         freshness_caption("critique.json")
+
+
