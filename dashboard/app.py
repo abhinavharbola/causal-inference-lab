@@ -602,7 +602,7 @@ with tab1:
     st.header("Bias-Severity Curve")
     st.write(
         "Naive OLS, PSM, IPW, and AIPW estimates across confounding severities, "
-        "compared against the ground-truth ATE from the full randomized dataset."
+        "compared against the covariate-adjusted reference ATE from the full dataset."
     )
     st.caption(
         "Each point is the mean over independent subsample replicates and each bar spans the 2.5th to "
@@ -616,7 +616,7 @@ with tab1:
 
     if ground_truth is not None:
         m1, m2, m3 = st.columns(3)
-        m1.metric("Ground-truth ATE", f"{ground_truth['ate']:.4f}")
+        m1.metric("Reference ATE (adjusted)", f"{ground_truth['ate']:.4f}")
         m2.metric("95% CI lower", f"{ground_truth['ci_lower']:.4f}")
         m3.metric("95% CI upper", f"{ground_truth['ci_upper']:.4f}")
 
@@ -647,7 +647,7 @@ with tab1:
             )
 
         if ground_truth is not None:
-            ax.axhline(ground_truth["ate"], color=INK, linestyle="--", linewidth=1.5, label="Ground truth ATE")
+            ax.axhline(ground_truth["ate"], color=INK, linestyle="--", linewidth=1.5, label="Reference ATE (adjusted)")
             ax.axhspan(ground_truth["ci_lower"], ground_truth["ci_upper"], color=PRIMARY, alpha=0.08)
 
         ax.set_xticks(range(len(present_severities)))
@@ -799,7 +799,7 @@ with tab2:
     else:
         format_cols = {
             c: "{:.4f}"
-            for c in ["point_estimate", "ci_lower", "ci_upper", "mean_predicted_cate"]
+            for c in ["point_estimate", "ci_lower", "ci_upper", "unadjusted_estimate", "mean_predicted_cate"]
             if c in segment_df.columns
         }
         styled = segment_df.style.format(format_cols)
@@ -817,7 +817,7 @@ with tab2:
             )
             st.caption(
                 "Measures how much of the model's predicted effect variation the segmentation captures. "
-                "Observed per-segment effects are randomized comparisons regardless of this value."
+                "Per-segment effects are covariate-adjusted AIPW estimates regardless of this value."
             )
 
         fig, ax = _new_fig(CHART_FIGSIZE)
@@ -838,7 +838,7 @@ with tab2:
         ax.set_yticks(y_pos)
         ax.set_yticklabels(segment_df["segment"])
         ax.set_xlabel("Estimated treatment effect")
-        ax.set_title("Per-segment treatment effect with bootstrap CI")
+        ax.set_title("Per-segment adjusted treatment effect with 95% CI")
         fig.tight_layout()
         st.pyplot(fig, width="content")
         plt.close(fig)
@@ -1045,5 +1045,3 @@ with tab5:
             st.markdown(critique["critique_text"])
 
         freshness_caption("critique.json")
-
-

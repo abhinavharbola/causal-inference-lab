@@ -8,6 +8,7 @@ from sklearn.preprocessing import StandardScaler
 from statsmodels.stats.proportion import proportions_ztest
 
 from src.utils.bootstrap import analytic_ci_diff_in_proportions, bootstrap_diff_in_means
+from src.validation.estimators import PROPENSITY_COL, aipw_scores_cross_fitted, attach_propensity
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def segment_cate_separation(
         logger.warning(
             "Segments explain only %.1f%% of predicted-CATE variance (eta^2=%.4f, threshold=%.2f). "
             "The segmentation does not track the model's predicted treatment-effect variation; "
-            "observed per-segment effects remain valid randomized comparisons but are not "
+            "per-segment effect estimates remain valid but are not "
             "evidence about what the CATE model learned.",
             100 * eta_squared, eta_squared, CATE_SEPARATION_THRESHOLD,
         )
@@ -178,6 +179,87 @@ def compute_segment_effects(
 
     result_df = pd.DataFrame(rows)
     logger.info("Computed segment effects for %d segments", len(result_df))
+
+    if has_cate and len(result_df) >= 2:
+        result_df.attrs["cate_separation"] = segment_cate_separation(df, segment_col, cate_col="cate")
+
+    if len(result_df) >= 2:
+        result_df.attrs["effect_heterogeneity"] = segment_effect_heterogeneity(result_df)
+
+    return result_df
+
+
+def compute_adjusted_segment_effects(
+    df: pd.DataFrame,
+    segment_col: str,
+    treatment_col: str,
+    outcome_col: str,
+    covariate_cols: list,
+    n_splits: int = 5,
+    alpha: float = 0.05,
+    random_state: int = None,
+) -> pd.DataFrame:
+    with_propensity = attach_propensity(
+        df, treatment_col, covariate_cols, cross_fit=True, n_splits=n_splits, random_state=random_state
+    )
+    scores = aipw_scores_cross_fitted(
+        with_propensity,
+        outcome_col,
+        treatment_col,
+        covariate_cols,
+        PROPENSITY_COL,
+        n_splits=n_splits,
+        random_state=random_state,
+    )
+
+    z_crit = stats.norm.ppf(1 - alpha / 2)
+    segments = df[segment_col].to_numpy()
+    treatment = df[treatment_col].to_numpy()
+    outcome = df[outcome_col].to_numpy()
+    has_cate = "cate" in df.columns
+
+    rows = []
+    for segment_value in sorted(df[segment_col].dropna().unique()):
+        mask = segments == segment_value
+        treated_mask = mask & (treatment == 1)
+        control_mask = mask & (treatment == 0)
+        n_treated = int(treated_mask.sum())
+        n_control = int(control_mask.sum())
+
+        if n_treated < 2 or n_control < 2:
+            logger.warning(
+                "Segment %s has too few units in one arm (n_treated=%d, n_control=%d), skipping",
+                segment_value,
+                n_treated,
+                n_control,
+            )
+            continue
+
+        segment_scores = scores[mask]
+        estimate = float(segment_scores.mean())
+        se = float(segment_scores.std(ddof=1) / np.sqrt(mask.sum()))
+        p_value = float(2 * stats.norm.sf(abs(estimate / se))) if se > 0 else float("nan")
+
+        row = {
+            "segment": segment_value,
+            "n_segment": int(mask.sum()),
+            "n_treated": n_treated,
+            "n_control": n_control,
+            "point_estimate": estimate,
+            "se": se,
+            "ci_lower": estimate - z_crit * se,
+            "ci_upper": estimate + z_crit * se,
+            "p_value": p_value,
+            "unadjusted_estimate": float(outcome[treated_mask].mean() - outcome[control_mask].mean()),
+        }
+
+        if has_cate:
+            row["mean_predicted_cate"] = float(df.loc[mask, "cate"].mean())
+
+        rows.append(row)
+
+    result_df = pd.DataFrame(rows)
+    logger.info("Computed adjusted segment effects for %d segments", len(result_df))
 
     if has_cate and len(result_df) >= 2:
         result_df.attrs["cate_separation"] = segment_cate_separation(df, segment_col, cate_col="cate")
