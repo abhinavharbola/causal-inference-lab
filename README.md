@@ -1,6 +1,6 @@
 # Causal Impact & Heterogeneous Response Analysis
 
-A causal inference pipeline that turns randomized ad-exposure data into two tested answers: overall impact, and which audiences responded. Each estimator is benchmarked against a covariate-adjusted full-data reference effect, and each segment result is tested for significance and for whether segments genuinely differ.
+A causal inference pipeline on randomized ad-exposure data that answers two questions: what is the overall impact, and which audiences responded. Each estimator is benchmarked against a covariate-adjusted full-data reference effect, and each segment result is tested for significance and for genuine differences between segments.
 
 ## Preview
 
@@ -14,14 +14,13 @@ A causal inference pipeline that turns randomized ad-exposure data into two test
 
 Given the Criteo Uplift dataset, the pipeline:
 
-1. **Validates the method first.** Subsamples are confounded in a controlled way, then naive OLS, PSM, IPW, and AIPW are tested on whether they recover the reference effect. Independent replicates separate estimator bias from sampling noise.
-2. **Justifies the outcome.** An MDE calculation at the real arm sizes of the segment analysis decides between `visit` and `conversion`.
-3. **Finds who responds differently.** A CATE model fit on clean randomized data is evaluated against random targeting with a bootstrap interval. Separately, users are clustered into segments and each segment's covariate-adjusted effect is estimated.
-4. **Checks the finding is defensible.** Multiple-testing correction, a direct test of whether segment effects differ, and per-segment power.
+1. **Validates the method first.** Subsamples are confounded in a controlled way, then naive OLS, PSM, IPW, and AIPW are tested on recovering the reference effect. Independent replicates separate estimator bias from sampling noise.
+2. **Justifies the outcome.** An MDE calculation at the real segment-analysis arm sizes selects `visit` over `conversion`.
+3. **Finds who responds differently.** A CATE model fit on clean randomized data is evaluated against random targeting with a bootstrap interval. Separately, users are clustered into segments, each with a covariate-adjusted effect.
+4. **Checks defensibility.** Multiple-testing correction, a direct test of whether segment effects differ, and per-segment power.
 5. **Stress-tests the result.** Rosenbaum bounds show how much unmeasured confounding would overturn the matched-pairs conclusion.
 
-Every run writes its numbers to `data/processed/` or the run database, and the dashboard displays them. Runs are seeded from `src/config.py`, so reruns on the same data reproduce the same numbers.
-
+Every run writes to `data/processed/` or the run database, and the dashboard reads from there. Runs are seeded from `src/config.py`, so reruns on the same data reproduce the same numbers.
 
 ## Dataset
 
@@ -37,9 +36,12 @@ Every run writes its numbers to `data/processed/` or the run database, and the d
 
 Analyses use `treatment`, so effects are effects of assignment, not of effective exposure.
 
-Loading tries `datasets.load_dataset`, then `sklift.datasets.fetch_criteo`. An integrity check raises `DataIntegrityError` on a wrong row count, missing or extra columns, treated share outside 0.85 +/- 0.005, visit rate outside 0.0470 +/- 0.001, or conversion rate outside 0.0029 +/- 0.0002.
+Loading tries `datasets.load_dataset`, then `sklift.datasets.fetch_criteo`. `DataIntegrityError` is raised on a wrong row count, missing or extra columns, treated share outside 0.85 +/- 0.005, visit rate outside 0.0470 +/- 0.001, or conversion rate outside 0.0029 +/- 0.0002.
 
-Full-dataset reference effect: the raw difference in means is weakly confounded in Criteo (largest standardized covariate difference 0.049, out-of-fold propensity AUC 0.509), so the reference is a cross-fitted AIPW estimate on all rows. `visit` ATE 0.00715 (95% CI [0.00689, 0.00740]; raw difference 0.01034, Hajek IPW 0.00780), `conversion` ATE 0.00097 (raw difference 0.00115). Control rates are 3.82% (`visit`) and 0.194% (`conversion`).
+**Reference effect.** Covariate imbalance in Criteo is small (largest standardized difference 0.049, out-of-fold propensity AUC 0.509), yet the raw difference in means still overstates the effect. The reference is therefore a cross-fitted AIPW estimate on all rows:
+
+- `visit` ATE 0.00715 (95% CI [0.00689, 0.00740]); raw difference 0.01034, Hajek IPW 0.00780. Control rate 3.82%.
+- `conversion` ATE 0.00097; raw difference 0.00115. Control rate 0.194%.
 
 ### Why `visit`, not `conversion`
 
@@ -50,7 +52,7 @@ Segment analysis uses a 30% holdout of a 500,000-row sample: 150,000 rows, 22,50
 | `visit` | 3.82% | 0.00398 | 10.4% |
 | `conversion` | 0.194% | 0.00099 | 51.2% |
 
-The `visit` effect is about 19% of its control rate, roughly 1.8 times its MDE of 0.00398. The `conversion` effect is about 50% of its control rate, 0.00097 against an MDE of 0.00099, so it sits at the detection limit and per-segment conversion estimates would be unreliable. **Sections 2 and 3 therefore use `visit`**; `conversion` appears only as a reference ATE in Section 1. Detecting the `visit` effect at 80% power needs 7,222 control units, against 22,500 available.
+The `visit` effect is about 19% of its control rate, 1.8 times its MDE. The `conversion` effect (0.00097) sits at its MDE (0.00099), so per-segment conversion estimates would be unreliable. **Sections 2 and 3 therefore use `visit`**; `conversion` appears only as a reference ATE in Section 1. Detecting the `visit` effect at 80% power needs 7,222 control units; 22,500 are available.
 
 ## Pipeline
 
@@ -81,11 +83,11 @@ flowchart TD
 
 ### Section 1: Validation via self-induced confounding
 
-- **Retention.** Rows are kept by a rule on one covariate X and treatment, holding the retention rate (`keep_fraction`, default 0.5) and X's marginal distribution fixed. Treated rows are kept with probability `lower + (upper - lower) * sigmoid(g2 * X)`; control probabilities are set so the retention rate holds at every X. `g2 = 0` means no confounding. X's distribution is unchanged, so the adjusted full-data reference stays the target. The retained sample keeps the baseline covariate imbalance, so naive OLS differs from the reference even at `g2 = 0`.
+- **Retention.** Rows are kept by a rule on one covariate X and treatment, holding the retention rate (`keep_fraction`, default 0.5) and X's marginal distribution fixed. Treated rows are kept with probability `lower + (upper - lower) * sigmoid(g2 * X)`; control probabilities are set so the retention rate holds at every X. `g2 = 0` means no confounding. Because X's distribution is unchanged, the full-data reference stays the valid target. The retained sample keeps the baseline imbalance, so naive OLS differs from the reference even at `g2 = 0`.
 - **Covariate.** X is the feature most correlated with the outcome; an outcome-irrelevant X cannot bias the naive estimate.
-- **Gate.** Needs a significant X-treatment correlation and the reference effect outside the naive estimate's 95% interval on the same retained sample.
+- **Gate.** Requires a significant X-treatment correlation and the reference effect outside the naive estimate's 95% interval on the same retained sample.
 - **Calibration.** From `g2 = 0.25` in steps of 0.25 (up to 8 iterations), keep the smallest passing value. Severities: `none` (0), `mild` (g2), `moderate` (2 g2), `strong` (3 g2).
-- **Replicates.** Each of `N_REPLICATES` (default 20) draws a fresh 300,000-row subsample and runs every severity and estimator. Logged estimate is the mean; band is the 2.5th to 97.5th percentile.
+- **Replicates.** Each of `N_REPLICATES` (default 20) draws a fresh 300,000-row subsample and runs every severity and estimator. The logged estimate is the mean; the band is the 2.5th to 97.5th percentile.
 
 All estimators share one cross-fitted propensity (5-fold, clipped to [0.001, 0.999]) and one population trimmed to the propensity range common to both arms.
 
@@ -98,33 +100,33 @@ All estimators share one cross-fitted propensity (5-fold, clipped to [0.001, 0.9
 
 With about 85% treated, PSM is capped by the retained control count and, under confounding, targets a different population than the full-sample ATE.
 
-Diagnostics use the first replicate's `strong` sample. Overlap is reported as the share of the candidate pool inside the shared propensity range (lenient, near 100% for most data) and as the overlap coefficient, the shared area of the two propensity histograms (1.0 identical, 0.0 disjoint).
+Diagnostics use the first replicate's `strong` sample. Overlap is reported two ways: the share of the candidate pool inside the shared propensity range (lenient, near 100% for most data) and the overlap coefficient, the shared area of the two propensity histograms (1.0 identical, 0.0 disjoint).
 
 ### Section 2: Heterogeneity
 
 A **T-learner** (per-arm logistic regression, sigmoid-calibrated, 3-fold) is fit on a clean 500,000-row sample with a treatment-stratified 30% holdout.
 
 - **Qini.** Coefficient with a 200-resample bootstrap interval.
-- **Segments.** 4 KMeans clusters on standardized holdout covariates. Effects are cross-fitted AIPW estimates computed within each segment, with influence-function intervals and z-test p-values. The raw treated-minus-control difference is saved alongside as `unadjusted_estimate`.
+- **Segments.** 4 KMeans clusters on standardized holdout covariates. Each segment gets a cross-fitted AIPW effect with influence-function intervals and z-test p-values; the raw treated-minus-control difference is saved as `unadjusted_estimate`.
 - **Separation.** Eta-squared is the share of predicted-CATE variance the clusters capture, flagged below 0.05. Segment effect estimates stay valid when it is low.
 
 ### Section 3: Statistical rigor
 
 - **Benjamini-Hochberg** corrects the per-segment "effect differs from zero" tests. Significance is not heterogeneity.
 - **Cochran Q** (with I-squared) tests whether segment effects differ, using the segments' influence-function standard errors.
-- **Power** uses observed per-segment arm counts, the holdout control rate, and the adjusted reference ATE as the assumed effect. Without `ground_truth.json` it falls back to the median segment effect and records `effect_size_source`.
+- **Power** uses observed per-segment arm counts, the holdout control rate, and the reference ATE as the assumed effect. Without `ground_truth.json` it falls back to the median segment effect and records `effect_size_source`.
 
 ### Section 4: Sensitivity analysis
 
-**Rosenbaum bounds** run on PSM pairs rebuilt from the saved `strong` sample with the same propensity, trimming, and seed as the estimator comparison. The critical Gamma is solved exactly (alpha 0.05, up to 10); the bounds table uses a 0.1 grid. If the effect is not significant at Gamma = 1, no sensitivity conclusion applies. Classification: critical Gamma below 1.5 is fragile, below 3 moderate, otherwise robust. Few discordant pairs force a low critical Gamma, so read it with the discordant-pair count.
+**Rosenbaum bounds** run on PSM pairs rebuilt from the saved `strong` sample with the same propensity, trimming, and seed as the estimator comparison. The critical Gamma is solved exactly (alpha 0.05, up to 10); the bounds table uses a 0.1 grid. If the effect is not significant at Gamma = 1, no sensitivity conclusion applies. Critical Gamma below 1.5 is fragile, below 3 moderate, otherwise robust. Few discordant pairs force a low critical Gamma, so read it alongside the discordant-pair count.
 
 ### Section 5: LLM critique
 
-The only LLM step. It reads the balance table, overlap statistics, and Rosenbaum result and flags likely assumption violations in 3 to 5 bullets. Order: **Groq**, **NVIDIA NIM**, then a rule-based critique driven by the overlap coefficient. Truncated or empty completions count as failures. The LLM interprets diagnostics and cannot change any result.
+The only LLM step. It reads the balance table, overlap statistics, and Rosenbaum result, and flags likely assumption violations in 3 to 5 bullets. Order: **Groq**, **NVIDIA NIM**, then a rule-based critique driven by the overlap coefficient. Truncated or empty completions count as failures. The LLM interprets diagnostics and cannot change any result.
 
 ## Results
 
-Single run: seed 42, 20 replicates, `f9` as the confounder. The reference is a cross-fitted AIPW estimate on all rows: `visit` ATE 0.00715 (95% CI [0.00689, 0.00740]). The raw difference (0.01034) overstates it by 45%; IPW gives 0.00780.
+Single run: seed 42, 20 replicates, `f9` as the confounder. Reference `visit` ATE: 0.00715 (95% CI [0.00689, 0.00740]). The raw difference (0.01034) overstates it by 45%; IPW gives 0.00780.
 
 **Estimator bias against the reference**
 
@@ -135,7 +137,7 @@ Single run: seed 42, 20 replicates, `f9` as the confounder. The reference is a c
 | IPW | +5% | +8% | +24% | +47% |
 | AIPW | -3% | -7% | -16% | -36% |
 
-Adjusted estimators recover the reference with no or mild confounding; none do at `strong`. IPW and AIPW drift in opposite directions (roughly 3 to 5 standard errors at `moderate` and `strong`), and the cause is unresolved. Matching on the `strong` sample cut the largest standardized difference from 0.387 to 0.023 (23,294 pairs, 18.4% of treated, overlap coefficient 0.886).
+IPW and AIPW stay within 8% through `mild`; PSM does not (-23%), partly because it targets a different population. No estimator recovers the reference at `strong`. IPW and AIPW drift in opposite directions (roughly 3 to 5 standard errors at `moderate` and `strong`); the cause is unresolved. Matching on the `strong` sample cut the largest standardized difference from 0.387 to 0.023 (23,294 pairs, 18.4% of treated, overlap coefficient 0.886).
 
 **Heterogeneity.** The T-learner's Qini coefficient is 0.0565 (95% CI [0.0301, 0.0854]), better than random targeting. Segments on the 150,000-row holdout, with AIPW-adjusted effects:
 
@@ -168,7 +170,7 @@ Effects differ across segments (Cochran Q 26.9, p = 6e-06, I-squared 89%), and t
 
 ## Validity checks
 
-- **Adjusted reference.** The benchmark target is a cross-fitted AIPW estimate, because the raw difference in means is weakly confounded in Criteo itself.
+- **Adjusted reference.** The benchmark is a cross-fitted AIPW estimate, since the raw difference in means is biased even in Criteo itself.
 - **One propensity everywhere.** Estimators, diagnostics, and Rosenbaum share one cross-fitted propensity and one trimmed population, naive OLS included.
 - **True 1:1 matching.** Matched controls leave the pool; diagnostics count distinct control rows by identity, since Criteo covariates are bucketed and rows share values.
 - **Segments validated twice.** Eta-squared checks that clusters track predicted CATE; Cochran Q checks that effects differ.
@@ -247,7 +249,7 @@ causal-inference-lab/
    | `SUPABASE_URL` / `SUPABASE_KEY` | Run logging | `data/local_runs.db` |
    | `LOGFIRE_TOKEN` | Structured logging | Console logging |
 
-3. **Database.** SQLite needs no setup. For Supabase, create the table first, since the app never creates it:
+3. **Database.** SQLite needs no setup. For Supabase, create the table first; the app never creates it:
 
    ```sql
    create table estimation_runs (
@@ -273,7 +275,7 @@ causal-inference-lab/
 jupyter notebook
 ```
 
-Run the notebooks in order. They orchestrate `src/` and also hold some pipeline logic (reference effect, the replicate loop, run logging, power-input selection). Settings are in `src/config.py`; lower `N_REPLICATES` for a faster pass. Notebooks 1 and 2 load all 13.98M rows, so budget several GB of RAM.
+Run the notebooks in order. They orchestrate `src/` and also hold some pipeline logic (reference effect, replicate loop, run logging, power-input selection). Settings live in `src/config.py`; lower `N_REPLICATES` for a faster pass. Notebooks 1 and 2 load all 13.98M rows, so budget several GB of RAM.
 
 | Notebook | Writes |
 |---|---|
@@ -287,7 +289,7 @@ Files go to `data/processed/` except the parquet, which notebook 3 needs from no
 streamlit run dashboard/app.py
 ```
 
-The dashboard has six tabs: validation, outcome MDE, heterogeneity, rigor, sensitivity, critique. It reads saved outputs and recomputes only the MDE calculator, which opens with the notebook 1 values. A missing output names the notebook to run. Database reads are cached for 30 seconds or until "Refresh data" is clicked.
+Six tabs: validation, outcome MDE, heterogeneity, rigor, sensitivity, critique. The dashboard reads saved outputs and recomputes only the MDE calculator, which opens with the notebook 1 values. A missing output names the notebook to run. Database reads are cached for 30 seconds or until "Refresh data" is clicked.
 
 ```bash
 pytest tests/ -v
@@ -297,16 +299,9 @@ Tests cover retention, the gate, calibration, cross-fitting, matching, IPW, crit
 
 ## Known limitations
 
-- **PSM coverage.** Matching without replacement is capped by the retained control count and skews toward values where controls are plentiful.
-- **Design-specific bias curves.** They depend on the covariate, retention rule, and replicate count; the band is subsampling variability, not a confidence interval.
-- **The gate is a screen.** It can pass by chance (5% level) and does not prove confounding.
-- **Approximate segment tests.** Power uses the aggregate effect, so a segment can be significant yet underpowered. Cochran Q is a large-sample approximation.
-- **Segmentation ignores CATE.** KMeans uses covariates only; eta-squared measures how well clusters track predicted effects.
-- **Narrow Rosenbaum.** PSM only, conservative with few discordant pairs, and one-sided: a harmful effect appears as not significant.
-- **Unused bootstrap path.** `run_estimator_comparison_with_ci` is not called by the notebooks and omits nuisance-model uncertainty.
-- **Reference model dependence.** The reference is AIPW, the same family as one benchmarked estimator, and it assumes treatment is ignorable given the 12 covariates. AIPW (0.00715) and IPW (0.00780) differ by more than the reference interval, so the true adjusted effect is only pinned to roughly 0.0071 to 0.0078.
-- **Estimators diverge under strong confounding.** IPW overshoots, and AIPW and PSM undershoot, the reference at `moderate` and `strong` severity. The cause has not been isolated.
-- **Segment adjustment is covariate-only.** Segment effects use logistic nuisance models on the 12 covariates, cross-fitted within the 150,000-row holdout, so they correct for imbalance on those covariates and nothing else.
-- **Qini is unadjusted.** The Qini coefficient and its bootstrap interval still use raw treated-versus-control comparisons, so they carry the baseline imbalance. The size of that effect was not measured.
-- **Segment power uses one base rate.** `segment_power_analysis` applies the holdout-wide control rate to every segment, but segment standard errors suggest base rates differ widely, so per-segment power figures are rough.
-- **Retained raw path.** `compute_segment_effects` (raw differences with bootstrap intervals) stays in the code and tests but is no longer called by notebook 2.
+- **Benchmark.** The reference is AIPW, which assumes ignorability given the 12 covariates. AIPW (0.00715) and IPW (0.00780) differ by more than the reference interval, so the true adjusted effect is only pinned to about 0.0071 to 0.0078. Under strong confounding IPW overshoots while AIPW and PSM undershoot; the cause is not isolated.
+- **Bias curves.** They are specific to the covariate, retention rule, and replicate count. The band is subsampling variability, not a confidence interval, and the gate is a screen that can pass by chance.
+- **PSM.** Matching without replacement is capped by the retained control count and skews toward values where controls are plentiful.
+- **Heterogeneity inference is approximate.** Cochran Q is a large-sample approximation. Segment adjustment covers only the 12 covariates. Power applies one base rate to every segment, so per-segment power is rough. Qini and its interval are unadjusted, with the effect of that unmeasured. Segments ignore CATE.
+- **Rosenbaum.** PSM only, conservative with few discordant pairs, and one-sided: a harmful effect appears as not significant.
+- **Unused code.** `run_estimator_comparison_with_ci` and `compute_segment_effects` are not called by the notebooks.
